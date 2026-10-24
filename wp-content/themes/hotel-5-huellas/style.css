@@ -1,1 +1,38 @@
-body { font-family: Arial, sans-serif; }
+/*
+Theme Name: Hotel 5 Huellas
+Version: 1.0
+*/
+* { box-sizing: border-box; }
+body { font-family: Arial, sans-serif; margin: 0; color: #333; background: #f5f7f6; }
+.hero { background: #2d6a4f; color: white; text-align: center; padding: 40px 20px; }
+.buscador { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; align-items: flex-end; margin-top: 20px; }
+.buscador label { display: flex; flex-direction: column; text-align: left; font-size: 13px; gap: 4px; }
+.buscador .check { flex-direction: row; align-items: center; font-size: 14px; }
+input, select { padding: 8px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; }
+button { background: #2d6a4f; color: white; border: 0; padding: 10px 18px; border-radius: 8px; cursor: pointer; }
+.hero button { background: #f4a261; color: #222; font-weight: bold; }
+.contenido { display: grid; grid-template-columns: 240px 1fr 1fr; gap: 20px; max-width: 1300px; margin: 20px auto; padding: 0 16px; }
+.filtros { background: white; padding: 16px; border-radius: 12px; align-self: start; display: flex; flex-direction: column; gap: 14px; }
+.filtros label { display: flex; flex-direction: column; gap: 6px; font-size: 14px; }
+.tiempo { font-size: 14px; background: #f1f8f4; padding: 10px; border-radius: 8px; }
+.tiempo:empty { display: none; }
+#lista-hoteles { display: flex; flex-direction: column; gap: 12px; }
+.hotel { display: grid; grid-template-columns: 140px 1fr auto; gap: 12px; background: white; border-radius: 12px; padding: 10px; align-items: center; }
+.hotel img { width: 140px; height: 100px; object-fit: cover; border-radius: 8px; background: #ddd; }
+.hotel h3 { margin: 0 0 6px; font-size: 17px; }
+.hotel p { margin: 0; font-size: 14px; color: #555; }
+.precio { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.precio strong { font-size: 20px; }
+.precio small { color: #777; }
+#mapa { height: 600px; position: sticky; top: 10px; border-radius: 12px; }
+.bloque { max-width: 900px; margin: 30px auto; padding: 0 20px; }
+#form-reserva { display: flex; flex-wrap: wrap; gap: 8px; }
+#foto-mascota { max-width: 300px; border-radius: 10px; margin-top: 12px; display: block; }
+footer { text-align: center; background: #eee; padding: 20px; margin-top: 30px; }
+@media (max-width: 1000px) {
+  .contenido { grid-template-columns: 1fr; }
+  #mapa { height: 350px; position: static; }
+  .hotel { grid-template-columns: 100px 1fr; }
+  .hotel img { width: 100px; }
+  .precio { grid-column: 1 / -1; align-items: flex-start; }
+}
