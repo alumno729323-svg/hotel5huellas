@@ -23,6 +23,11 @@ services:
       WORDPRESS_DB_USER: wp
       WORDPRESS_DB_PASSWORD: ${DB_PASSWORD}
       WORDPRESS_DB_NAME: wordpress
+      WORDPRESS_CONFIG_EXTRA: |
+        if (isset($$_SERVER['HTTP_X_FORWARDED_PROTO']) && $$_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https') { $$_SERVER['HTTPS'] = 'on'; }
+        $$scheme = (isset($$_SERVER['HTTPS']) && $$_SERVER['HTTPS'] === 'on') ? 'https' : 'http';
+        define('WP_HOME', $$scheme . '://' . $$_SERVER['HTTP_HOST']);
+        define('WP_SITEURL', $$scheme . '://' . $$_SERVER['HTTP_HOST']);
     volumes:
       - uploads:/var/www/html/wp-content/uploads
 
