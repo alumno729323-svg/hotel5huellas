@@ -7,19 +7,38 @@
   <?php wp_head(); ?>
 </head>
 <body>
+  <nav class="barra">
+    <a class="logo" href="#">🐾 Hotel 5 Huellas</a>
+    <label class="moneda">Moneda
+      <select id="moneda">
+        <option value="EUR">EUR €</option>
+        <option value="USD">USD $</option>
+        <option value="GBP">GBP £</option>
+      </select>
+    </label>
+  </nav>
+
   <header class="hero">
-    <h1>🐾 Hotel 5 Huellas</h1>
-    <p>Encuentra el hotel perfecto, donde tu mascota también es bienvenida</p>
+    <h1>Compara hoteles donde tu mascota también es bienvenida</h1>
+    <p>Encuentra el mejor precio entre varias agencias en un solo sitio</p>
     <form id="buscador" class="buscador" autocomplete="off">
-      <label>Destino
-        <input type="text" id="destino" list="sugerencias" placeholder="Madrid, Barcelona...">
+      <label class="campo"><span>Destino</span>
+        <input type="text" id="destino" list="sugerencias" placeholder="¿A dónde vas?">
       </label>
       <datalist id="sugerencias"></datalist>
-      <label>Entrada <input type="date" id="entrada"></label>
-      <label>Salida <input type="date" id="salida"></label>
-      <label class="check"><input type="checkbox" id="mascotas"> 🐾 Admite mascotas</label>
-      <button type="submit">Buscar</button>
+      <label class="campo"><span>Entrada</span><input type="date" id="entrada"></label>
+      <label class="campo"><span>Salida</span><input type="date" id="salida"></label>
+      <label class="campo check"><input type="checkbox" id="mascotas"><span>🐾 Admite mascotas</span></label>
+      <button type="submit" class="buscar">Buscar</button>
     </form>
+    <div class="populares">
+      Destinos populares:
+      <button type="button" class="chip" data-destino="Madrid">Madrid</button>
+      <button type="button" class="chip" data-destino="Barcelona">Barcelona</button>
+      <button type="button" class="chip" data-destino="Valencia">Valencia</button>
+      <button type="button" class="chip" data-destino="Sevilla">Sevilla</button>
+      <button type="button" class="chip" data-destino="Toledo">Toledo</button>
+    </div>
   </header>
 
   <main class="contenido">
@@ -28,7 +47,7 @@
       <label>Precio máximo por noche: <output id="precio-valor">sin límite</output>
         <input type="range" id="precio-max" min="30" max="300" step="5" value="300">
       </label>
-      <label>Estrellas mínimas
+      <label>Estrellas
         <select id="estrellas">
           <option value="0">Todas</option>
           <option value="2">2 ★ o más</option>
@@ -37,19 +56,34 @@
           <option value="5">5 ★</option>
         </select>
       </label>
-      <label>Moneda
-        <select id="moneda">
-          <option value="EUR">Euro (€)</option>
-          <option value="USD">Dólar ($)</option>
-          <option value="GBP">Libra (£)</option>
+      <label>Valoración
+        <select id="valoracion">
+          <option value="0">Cualquiera</option>
+          <option value="7">Bueno 7+</option>
+          <option value="8">Muy bueno 8+</option>
+          <option value="9">Excepcional 9+</option>
         </select>
       </label>
       <div id="tiempo" class="tiempo"></div>
     </aside>
 
     <section class="resultados">
-      <h2 id="titulo-resultados">Hoteles</h2>
+      <div class="cabecera-resultados">
+        <h2 id="titulo-resultados">Hoteles</h2>
+        <div class="acciones">
+          <label>Ordenar por
+            <select id="orden">
+              <option value="recomendados">Recomendados</option>
+              <option value="precio">Precio más bajo</option>
+              <option value="valoracion">Mejor valorados</option>
+              <option value="estrellas">Más estrellas</option>
+            </select>
+          </label>
+          <button type="button" id="ver-mapa" class="secundario">🗺️ Mapa</button>
+        </div>
+      </div>
       <div id="lista-hoteles"></div>
+      <p class="nota-pie">Las valoraciones y los precios de las agencias son datos de ejemplo para la práctica.</p>
     </section>
 
     <div id="mapa"></div>
@@ -58,7 +92,7 @@
   <section class="bloque">
     <h2>Reserva</h2>
     <form id="form-reserva">
-      <input type="text" id="hotel" placeholder="Pulsa «Reservar» en un hotel" readonly>
+      <input type="text" id="hotel" placeholder="Pulsa «Ver oferta» en un hotel" readonly>
       <input type="text" id="dueno" placeholder="Tu nombre" required>
       <select id="mascota">
         <option value="Perro">Perro</option>
@@ -73,13 +107,24 @@
     <ul id="lista"></ul>
   </section>
 
-  <section class="bloque">
-    <h2>Selecciona tu mascota</h2>
-    <div class="selector">
-      <button type="button" data-tipo="perro">🐶 Perro</button>
-      <button type="button" data-tipo="gato">🐱 Gato</button>
-    </div>
-    <img id="foto-mascota" alt="Foto de mascota" hidden>
+  <section class="bloque" id="camara">
+    <h2>📷 Mira cómo está tu mascota</h2>
+    <p>Pide una foto de tu mascota en cualquier momento durante su estancia.</p>
+    <form id="form-camara" class="form-camara">
+      <input type="text" id="nombre-mascota" placeholder="Nombre de tu mascota" maxlength="30">
+      <select id="tipo-mascota">
+        <option value="perro">🐶 Perro</option>
+        <option value="gato">🐱 Gato</option>
+      </select>
+      <button type="submit">Ver cómo está</button>
+      <label class="auto"><input type="checkbox" id="auto-foto"> Actualizar cada 30 s</label>
+    </form>
+    <p id="mensaje-camara"></p>
+    <figure id="camara-resultado" class="camara-resultado" hidden>
+      <img id="foto-mascota" alt="Foto de tu mascota">
+      <figcaption id="estado-mascota"></figcaption>
+    </figure>
+    <p class="nota-pie">Las fotos son imágenes aleatorias de ejemplo, no una cámara real.</p>
   </section>
 
   <footer>
