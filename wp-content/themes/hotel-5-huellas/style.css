@@ -3,7 +3,6 @@ Theme Name: Hotel 5 Huellas
 Version: 1.0
 */
 * { box-sizing: border-box; }
-[hidden] { display: none !important; }
 body { font-family: "Segoe UI", Arial, sans-serif; margin: 0; color: #1f2d3d; background: #f3f6f9; }
 input, select { padding: 9px; border: 1px solid #c8d2dc; border-radius: 8px; font-size: 14px; background: white; }
 button { background: #0a5c8a; color: white; border: 0; padding: 10px 18px; border-radius: 8px; cursor: pointer; font-size: 14px; }
@@ -67,13 +66,7 @@ button:hover { background: #084a70; }
 
 .bloque { max-width: 900px; margin: 30px auto; padding: 0 20px; }
 #form-reserva { display: flex; flex-wrap: wrap; gap: 8px; }
-
-.form-camara { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-.form-camara .auto { font-size: 14px; display: flex; align-items: center; gap: 6px; }
-.camara-resultado { margin: 16px 0 0; background: white; border: 1px solid #e1e8ef; border-radius: 12px; overflow: hidden; max-width: 420px; }
-#foto-mascota { width: 100%; max-height: 380px; object-fit: cover; display: block; }
-.camara-resultado figcaption { padding: 12px 14px; font-size: 15px; }
-
+#foto-mascota { max-width: 300px; border-radius: 10px; margin-top: 12px; display: block; }
 footer { text-align: center; background: #e6ecf1; padding: 20px; margin-top: 30px; }
 
 @media (max-width: 1000px) {

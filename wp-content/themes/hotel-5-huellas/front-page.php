@@ -107,24 +107,13 @@
     <ul id="lista"></ul>
   </section>
 
-  <section class="bloque" id="camara">
-    <h2>📷 Mira cómo está tu mascota</h2>
-    <p>Pide una foto de tu mascota en cualquier momento durante su estancia.</p>
-    <form id="form-camara" class="form-camara">
-      <input type="text" id="nombre-mascota" placeholder="Nombre de tu mascota" maxlength="30">
-      <select id="tipo-mascota">
-        <option value="perro">🐶 Perro</option>
-        <option value="gato">🐱 Gato</option>
-      </select>
-      <button type="submit">Ver cómo está</button>
-      <label class="auto"><input type="checkbox" id="auto-foto"> Actualizar cada 30 s</label>
-    </form>
-    <p id="mensaje-camara"></p>
-    <figure id="camara-resultado" class="camara-resultado" hidden>
-      <img id="foto-mascota" alt="Foto de tu mascota">
-      <figcaption id="estado-mascota"></figcaption>
-    </figure>
-    <p class="nota-pie">Las fotos son imágenes aleatorias de ejemplo, no una cámara real.</p>
+  <section class="bloque">
+    <h2>Selecciona tu mascota</h2>
+    <div class="selector">
+      <button type="button" data-tipo="perro">🐶 Perro</button>
+      <button type="button" data-tipo="gato">🐱 Gato</button>
+    </div>
+    <img id="foto-mascota" alt="Foto de mascota" hidden>
   </section>
 
   <footer>
