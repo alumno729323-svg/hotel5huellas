@@ -27,6 +27,7 @@ jobs:
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
           docker tag hotel-5-huellas $IMAGE
           docker push $IMAGE
+
   deploy:
     needs: build
     runs-on: self-hosted
@@ -36,4 +37,5 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Desplegar con Docker Compose
+        shell: cmd
         run: docker compose up -d --build -V
