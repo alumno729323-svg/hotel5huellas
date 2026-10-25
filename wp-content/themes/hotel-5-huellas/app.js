@@ -266,19 +266,48 @@ $('form-reserva').addEventListener('submit', async e => {
   } catch (err) { msg.textContent = 'Error de conexión'; }
 });
 
-// API pública: fotos de mascotas
+// API pública: foto aleatoria de la mascota (Dog CEO y The Cat API)
 const FOTOS = {
   perro: async () => (await (await fetch('https://dog.ceo/api/breeds/image/random')).json()).message,
   gato: async () => (await (await fetch('https://api.thecatapi.com/v1/images/search')).json())[0].url,
 };
-document.querySelectorAll('.selector button').forEach(btn => {
-  btn.addEventListener('click', async () => {
-    try {
-      const img = $('foto-mascota');
-      img.src = await FOTOS[btn.dataset.tipo]();
-      img.hidden = false;
-    } catch (err) { /* la API pública puede fallar a veces */ }
-  });
+const ESTADOS = [
+  'jugando en el jardín 🎾',
+  'echándose la siesta 😴',
+  'comiendo con ganas 🍖',
+  'paseando con su cuidador 🚶',
+  'recibiendo mimos 🤗',
+  'descansando al sol ☀️',
+];
+
+let temporizadorFoto;
+async function verMascota() {
+  const tipo = $('tipo-mascota').value;
+  const nombre = $('nombre-mascota').value.trim() || (tipo === 'perro' ? 'Tu perro' : 'Tu gato');
+  const aviso = $('mensaje-camara');
+  try {
+    const url = await FOTOS[tipo]();
+    $('foto-mascota').src = url;
+    const hora = new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+    const estado = ESTADOS[Math.floor(Math.random() * ESTADOS.length)];
+    $('estado-mascota').textContent = `${nombre} está ${estado} · ${hora}`;
+    $('camara-resultado').hidden = false;
+    aviso.textContent = '';
+  } catch (err) {
+    aviso.textContent = 'No hemos podido conseguir la foto ahora mismo. Inténtalo de nuevo.';
+  }
+}
+
+$('form-camara').addEventListener('submit', e => {
+  e.preventDefault();
+  verMascota();
+});
+$('auto-foto').addEventListener('change', () => {
+  clearInterval(temporizadorFoto);
+  if ($('auto-foto').checked) {
+    verMascota();
+    temporizadorFoto = setInterval(verMascota, 30000);
+  }
 });
 
 // Arranque

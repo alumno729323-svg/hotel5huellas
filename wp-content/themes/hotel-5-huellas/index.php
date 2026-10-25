@@ -6,7 +6,7 @@
   <?php wp_head(); ?>
 </head>
 <body>
-  <h1>Hola mundo</h1>
+  <h1>Hotel 5 Huellas</h1>
   <?php wp_footer(); ?>
 </body>
 </html>
