@@ -1,318 +1,331 @@
-const $ = id => document.getElementById(id);
-const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-
-let tasas = { EUR: 1 };
-let destino = null;
-let hoteles = [];
-let visibles = [];
-let hotelElegido = '';
-const sugerencias = {};
-
-// Fechas: no se puede elegir el pasado
-const hoy = new Date().toISOString().slice(0, 10);
-$('entrada').min = hoy;
-$('salida').min = hoy;
-
-// Mapa: Leaflet + OpenStreetMap
-const mapa = L.map('mapa').setView([40.2, -3.7], 5);
-L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-  maxZoom: 19,
-  attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-}).addTo(mapa);
-const capaMarcadores = L.layerGroup().addTo(mapa);
-
-// Construye la URL de nuestra API (vale con enlaces permanentes y sin ellos)
-function apiUrl(base, params = {}) {
-  const url = new URL(base, window.location.href);
-  Object.entries(params).forEach(([k, v]) => {
-    if (v !== '' && v !== null && v !== undefined) url.searchParams.set(k, v);
-  });
-  return url.toString();
-}
-
-function noches() {
-  const a = $('entrada').value;
-  const b = $('salida').value;
-  if (!a || !b) return 0;
-  const n = Math.round((new Date(b) - new Date(a)) / 86400000);
-  return n > 0 ? n : 0;
-}
-
-function precio(eur) {
-  const elegida = $('moneda').value;
-  const moneda = tasas[elegida] ? elegida : 'EUR';
-  return new Intl.NumberFormat('es-ES', { style: 'currency', currency: moneda, maximumFractionDigits: 0 })
-    .format(eur * tasas[moneda]);
-}
-
-// Datos simulados (valoración y precios de agencias) a partir del hotel
-const AGENCIAS = ['Web oficial', 'OfertasViaje', 'HotelMás'];
-const valoracionDe = h => 6.8 + ((h.id * 7) % 27) / 10;
-const opinionesDe = h => 120 + ((h.id * 53) % 900);
-const etiquetaDe = n => n >= 9 ? 'Excepcional' : n >= 8.5 ? 'Excelente' : n >= 8 ? 'Muy bueno' : n >= 7 ? 'Bueno' : 'Agradable';
-function ofertasDe(h) {
-  return AGENCIAS.map((nombre, i) => {
-    const factor = i === 0 ? 0.95 + (h.id % 6) / 100 : 0.97 + ((h.id * (i + 3)) % 14) / 100;
-    return { nombre, precio: Math.round(h.precio * factor) };
-  }).sort((a, b) => a.precio - b.precio);
-}
-
-// API pública: cambio de moneda (Frankfurter)
-async function cargarTasas() {
-  try {
-    const r = await fetch('https://api.frankfurter.dev/v1/latest?base=EUR&symbols=USD,GBP');
-    const d = await r.json();
-    tasas = { EUR: 1, ...d.rates };
-  } catch (err) { /* si falla, se muestra todo en euros */ }
-}
-
-// API pública: sugerencias de destino (Open-Meteo Geocoding)
-let temporizador;
-$('destino').addEventListener('input', () => {
-  clearTimeout(temporizador);
-  const q = $('destino').value.trim();
-  if (q.length < 2) return;
-  temporizador = setTimeout(async () => {
-    try {
-      const r = await fetch('https://geocoding-api.open-meteo.com/v1/search?count=5&language=es&name=' + encodeURIComponent(q));
-      const d = await r.json();
-      const lista = $('sugerencias');
-      lista.innerHTML = '';
-      (d.results || []).forEach(c => {
-        sugerencias[c.name.toLowerCase()] = { nombre: c.name, lat: c.latitude, lng: c.longitude };
-        const o = document.createElement('option');
-        o.value = c.name;
-        o.label = [c.admin1, c.country].filter(Boolean).join(', ');
-        lista.appendChild(o);
-      });
-    } catch (err) { /* sin sugerencias */ }
-  }, 300);
-});
-
-async function resolverDestino(texto) {
-  if (!texto) return null;
-  const guardado = sugerencias[texto.toLowerCase()];
-  if (guardado) return guardado;
-  try {
-    const r = await fetch('https://geocoding-api.open-meteo.com/v1/search?count=1&language=es&name=' + encodeURIComponent(texto));
-    const d = await r.json();
-    const c = (d.results || [])[0];
-    if (c) return { nombre: c.name, lat: c.latitude, lng: c.longitude };
-  } catch (err) { /* se usa solo el texto */ }
-  return { nombre: texto, lat: null, lng: null };
-}
-
-// API pública: tiempo del destino (Open-Meteo)
-const CLIMA = [[0, '☀️ Despejado'], [3, '⛅ Nuboso'], [48, '🌫️ Niebla'], [67, '🌧️ Lluvia'], [77, '❄️ Nieve'], [82, '🌦️ Chubascos'], [86, '❄️ Nieve'], [99, '⛈️ Tormenta']];
-const textoClima = code => (CLIMA.find(([max]) => code <= max) || [0, '🌡️'])[1];
-
-async function cargarClima() {
-  const caja = $('tiempo');
-  if (!destino || destino.lat === null) { caja.textContent = ''; return; }
-  try {
-    const url = `https://api.open-meteo.com/v1/forecast?latitude=${destino.lat}&longitude=${destino.lng}&current=temperature_2m,weather_code`;
-    const d = await (await fetch(url)).json();
-    caja.innerHTML = `<strong>Tiempo en ${esc(destino.nombre)}</strong><br>${textoClima(d.current.weather_code)} · ${Math.round(d.current.temperature_2m)} °C`;
-  } catch (err) { caja.textContent = ''; }
-}
-
-// API propia: hoteles con filtros
-async function cargarHoteles() {
-  const max = Number($('precio-max').value);
-  const params = {
-    ciudad: destino ? destino.nombre : $('destino').value.trim(),
-    precio_max: max < 300 ? max : '',
-    estrellas_min: $('estrellas').value,
-    mascotas: $('mascotas').checked ? '1' : '',
-  };
-  try {
-    const r = await fetch(apiUrl(HotelCfg.hotelesUrl, params));
-    const datos = await r.json();
-    hoteles = datos.map(h => ({ ...h, nota: valoracionDe(h), opin: opinionesDe(h), ofertas: ofertasDe(h) }));
-  } catch (err) { hoteles = []; }
-  pintarHoteles();
-}
-
-function ordenar(lista) {
-  const modo = $('orden').value;
-  const copia = [...lista];
-  if (modo === 'precio') copia.sort((a, b) => a.ofertas[0].precio - b.ofertas[0].precio);
-  else if (modo === 'valoracion') copia.sort((a, b) => b.nota - a.nota);
-  else if (modo === 'estrellas') copia.sort((a, b) => b.estrellas - a.estrellas || b.nota - a.nota);
-  else copia.sort((a, b) => (b.nota - b.ofertas[0].precio / 100) - (a.nota - a.ofertas[0].precio / 100));
-  return copia;
-}
-
-function pintarHoteles() {
-  const lista = $('lista-hoteles');
-  const n = noches();
-  const notaMin = Number($('valoracion').value);
-  visibles = ordenar(hoteles.filter(h => h.nota >= notaMin));
-  capaMarcadores.clearLayers();
-  $('titulo-resultados').textContent = visibles.length + (visibles.length === 1 ? ' hotel encontrado' : ' hoteles encontrados');
-  if (!visibles.length) {
-    lista.innerHTML = '<p>No hay hoteles con esos filtros.</p>';
-    return;
-  }
-  lista.innerHTML = visibles.map(h => `
-    <article class="hotel">
-      <img src="https://picsum.photos/seed/hotel${h.id}/320/240" alt="Foto de ${esc(h.nombre)}" loading="lazy">
-      <div class="datos">
-        <h3>${esc(h.nombre)}</h3>
-        <div class="estrellas">${'★'.repeat(h.estrellas)}</div>
-        <div class="valoracion">
-          <span class="nota">${h.nota.toFixed(1).replace('.', ',')}</span>
-          <strong>${etiquetaDe(h.nota)}</strong>
-          <small>${h.opin} opiniones</small>
-        </div>
-        <p class="lugar">📍 ${esc(h.ciudad)}</p>
-        ${h.mascotas ? '<span class="etiqueta">🐾 Admite mascotas</span>' : ''}
-      </div>
-      <div class="comparador">
-        <ul class="ofertas">
-          ${h.ofertas.map((o, i) => `<li class="${i === 0 ? 'mejor' : ''}"><span>${esc(o.nombre)}</span><b>${precio(o.precio)}</b></li>`).join('')}
-        </ul>
-        ${n ? `<small>${n} noche${n > 1 ? 's' : ''}: ${precio(h.ofertas[0].precio * n)}</small>` : '<small>Precio por noche</small>'}
-        <button type="button" data-hotel="${esc(h.nombre)}">Ver oferta</button>
-      </div>
-    </article>`).join('');
-
-  const puntos = [];
-  visibles.forEach(h => {
-    if (!h.lat || !h.lng) return;
-    puntos.push([h.lat, h.lng]);
-    L.marker([h.lat, h.lng])
-      .bindPopup(`<strong>${esc(h.nombre)}</strong><br>desde ${precio(h.ofertas[0].precio)} / noche`)
-      .addTo(capaMarcadores);
-  });
-  if (puntos.length) mapa.fitBounds(puntos, { padding: [30, 30], maxZoom: 14 });
-}
-
-// Buscador, destinos populares y filtros
-$('buscador').addEventListener('submit', async e => {
-  e.preventDefault();
-  destino = await resolverDestino($('destino').value.trim());
-  cargarClima();
-  cargarHoteles();
-});
-document.querySelectorAll('.chip').forEach(chip => {
-  chip.addEventListener('click', () => {
-    $('destino').value = chip.dataset.destino;
-    $('buscador').requestSubmit();
-  });
-});
-$('precio-max').addEventListener('input', () => {
-  const v = Number($('precio-max').value);
-  $('precio-valor').textContent = v >= 300 ? 'sin límite' : v + ' €';
-});
-$('precio-max').addEventListener('change', cargarHoteles);
-$('estrellas').addEventListener('change', cargarHoteles);
-$('mascotas').addEventListener('change', cargarHoteles);
-$('valoracion').addEventListener('change', pintarHoteles);
-$('orden').addEventListener('change', pintarHoteles);
-$('moneda').addEventListener('change', pintarHoteles);
-$('entrada').addEventListener('change', pintarHoteles);
-$('salida').addEventListener('change', pintarHoteles);
-
-// Mapa en pantallas pequeñas
-$('ver-mapa').addEventListener('click', () => {
-  document.body.classList.toggle('con-mapa');
-  setTimeout(() => mapa.invalidateSize(), 200);
-});
-
-// Elegir hotel
-$('lista-hoteles').addEventListener('click', e => {
-  const b = e.target.closest('button[data-hotel]');
-  if (!b) return;
-  hotelElegido = b.dataset.hotel;
-  $('hotel').value = hotelElegido;
-  $('form-reserva').scrollIntoView({ behavior: 'smooth' });
-});
-
-// API propia: reservas
-async function cargarReservas() {
-  const lista = $('lista');
-  try {
-    const reservas = await (await fetch(apiUrl(HotelCfg.reservasUrl))).json();
-    lista.innerHTML = reservas
-      .map(r => `<li>${esc(r.hotel || 'Hotel')} · ${esc(r.mascota)} · ${esc(r.entrada)} → ${esc(r.salida)}</li>`)
-      .join('');
-  } catch (err) { lista.innerHTML = ''; }
-}
-
-$('form-reserva').addEventListener('submit', async e => {
-  e.preventDefault();
-  const msg = $('mensaje');
-  if (!hotelElegido) { msg.textContent = 'Elige un hotel pulsando «Ver oferta» en la lista.'; return; }
-  if (!noches()) { msg.textContent = 'Elige fechas de entrada y salida válidas arriba.'; return; }
-  const datos = {
-    dueno: $('dueno').value,
-    hotel: hotelElegido,
-    mascota: $('mascota').value,
-    entrada: $('entrada').value,
-    salida: $('salida').value,
-  };
-  try {
-    const res = await fetch(HotelCfg.reservasUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(datos),
+(function () {
+  'use strict';
+  var C = window.HotelCfg || { root: '', nonce: '', user: {}, planes: {}, extras: {} };
+  var $ = function (s, el) { return (el || document).querySelector(s); };
+  var $$ = function (s, el) { return Array.prototype.slice.call((el || document).querySelectorAll(s)); };
+  var esc = function (s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
     });
-    const cuerpo = await res.json();
-    if (!res.ok) { msg.textContent = cuerpo.message || 'No se pudo reservar'; return; }
-    msg.textContent = '¡Reserva realizada!';
-    $('dueno').value = '';
-    cargarReservas();
-  } catch (err) { msg.textContent = 'Error de conexión'; }
-});
+  };
+  var eur = function (n) { return Number(n).toLocaleString('es-ES', { maximumFractionDigits: 2 }) + ' €'; };
+  var stars = function (n) { return '★'.repeat(n) + '☆'.repeat(5 - n); };
 
-// API pública: foto aleatoria de la mascota (Dog CEO y The Cat API)
-const FOTOS = {
-  perro: async () => (await (await fetch('https://dog.ceo/api/breeds/image/random')).json()).message,
-  gato: async () => (await (await fetch('https://api.thecatapi.com/v1/images/search')).json())[0].url,
-};
-const ESTADOS = [
-  'jugando en el jardín 🎾',
-  'echándose la siesta 😴',
-  'comiendo con ganas 🍖',
-  'paseando con su cuidador 🚶',
-  'recibiendo mimos 🤗',
-  'descansando al sol ☀️',
-];
-
-let temporizadorFoto;
-async function verMascota() {
-  const tipo = $('tipo-mascota').value;
-  const nombre = $('nombre-mascota').value.trim() || (tipo === 'perro' ? 'Tu perro' : 'Tu gato');
-  const aviso = $('mensaje-camara');
-  try {
-    const url = await FOTOS[tipo]();
-    $('foto-mascota').src = url;
-    const hora = new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
-    const estado = ESTADOS[Math.floor(Math.random() * ESTADOS.length)];
-    $('estado-mascota').textContent = `${nombre} está ${estado} · ${hora}`;
-    $('camara-resultado').hidden = false;
-    aviso.textContent = '';
-  } catch (err) {
-    aviso.textContent = 'No hemos podido conseguir la foto ahora mismo. Inténtalo de nuevo.';
+  /* ── API ── */
+  function api(path, opt) {
+    opt = opt || {};
+    var url = C.root + path;
+    if (opt.params) {
+      var qs = new URLSearchParams(opt.params).toString();
+      url += (url.indexOf('?') > -1 ? '&' : '?') + qs;
+    }
+    var init = { method: opt.method || 'GET', headers: { 'X-WP-Nonce': C.nonce }, credentials: 'same-origin' };
+    if (opt.body) { init.headers['Content-Type'] = 'application/json'; init.body = JSON.stringify(opt.body); }
+    return fetch(url, init).then(function (res) {
+      return res.json().catch(function () { return null; }).then(function (data) {
+        if (!res.ok) throw new Error((data && data.message) || ('Error ' + res.status));
+        return data;
+      });
+    }, function () { throw new Error('Sin conexión con el servidor'); });
   }
-}
 
-$('form-camara').addEventListener('submit', e => {
-  e.preventDefault();
-  verMascota();
-});
-$('auto-foto').addEventListener('change', () => {
-  clearInterval(temporizadorFoto);
-  if ($('auto-foto').checked) {
-    verMascota();
-    temporizadorFoto = setInterval(verMascota, 30000);
+  var toastT;
+  function toast(msg) {
+    var t = $('#toast'); if (!t) return;
+    t.textContent = msg; t.classList.add('show');
+    clearTimeout(toastT); toastT = setTimeout(function () { t.classList.remove('show'); }, 3200);
   }
-});
+  function setMsg(el, txt, ok) { if (!el) return; el.textContent = txt || ''; el.className = 'msg ' + (txt ? (ok ? 'ok' : 'err') : ''); }
 
-// Arranque
-(async function iniciar() {
-  await cargarTasas();
-  await cargarHoteles();
-  cargarReservas();
+  /* ── Login / registro ── */
+  var dlg = $('#authDlg');
+  function abrirAuth(tab) {
+    if (!dlg) return;
+    cambiarTab(tab || 'login');
+    setMsg($('#authMsg'), '');
+    if (dlg.showModal) dlg.showModal(); else dlg.setAttribute('open', '');
+  }
+  function cambiarTab(t) {
+    $$('.tab').forEach(function (b) { b.classList.toggle('on', b.dataset.tab === t); });
+    $('#formLogin').hidden = t !== 'login';
+    $('#formRegistro').hidden = t !== 'registro';
+  }
+  function datosForm(f) {
+    var o = {}; new FormData(f).forEach(function (v, k) { o[k] = v; }); return o;
+  }
+  function enviarAuth(form, ruta) {
+    var btn = $('button[type=submit]', form); btn.disabled = true;
+    setMsg($('#authMsg'), '');
+    api(ruta, { method: 'POST', body: datosForm(form) }).then(function () {
+      setMsg($('#authMsg'), '¡Listo! Entrando…', true);
+      location.reload(); // recarga para obtener la sesión nueva (nonce nuevo)
+    }).catch(function (e) {
+      setMsg($('#authMsg'), e.message); btn.disabled = false;
+    });
+  }
+  if ($('#btnAuth')) $('#btnAuth').addEventListener('click', function () { abrirAuth('login'); });
+  $$('.abrir-auth').forEach(function (b) { b.addEventListener('click', function () { abrirAuth('registro'); }); });
+  if ($('#authClose')) $('#authClose').addEventListener('click', function () { dlg.close ? dlg.close() : dlg.removeAttribute('open'); });
+  $$('.tab').forEach(function (b) { b.addEventListener('click', function () { cambiarTab(b.dataset.tab); }); });
+  if ($('#formLogin')) $('#formLogin').addEventListener('submit', function (e) { e.preventDefault(); enviarAuth(e.target, 'auth/login'); });
+  if ($('#formRegistro')) $('#formRegistro').addEventListener('submit', function (e) { e.preventDefault(); enviarAuth(e.target, 'auth/registro'); });
+  if ($('#btnLogout')) $('#btnLogout').addEventListener('click', function () {
+    api('auth/logout', { method: 'POST' }).then(function () { location.reload(); }).catch(function (e) { toast(e.message); });
+  });
+
+  /* ── Fotos de animales ── */
+  var TIPOS = ['perro', 'gato', 'zorro', 'pato'];
+  function cargarFoto(tipo, img, onOk) {
+    return api('animal', { params: { tipo: tipo } }).then(function (d) {
+      img.onload = function () { if (onOk) onOk(d); };
+      img.src = d.url;
+    });
+  }
+  var hero = $('#heroFoto');
+  function heroOtra(tipo) {
+    cargarFoto(tipo || 'perro', hero).catch(function () {});
+  }
+  if (hero) {
+    heroOtra('perro');
+    $('#heroOtra').addEventListener('click', function () { heroOtra(TIPOS[Math.floor(Math.random() * TIPOS.length)]); });
+  }
+
+  var ESTADOS = {
+    perro: ['comiendo su pienso', 'jugando con la pelota', 'echando la siesta', 'dando un paseo por el jardín', 'moviendo la cola'],
+    gato: ['tomando el sol en la ventana', 'persiguiendo una pluma', 'ronroneando', 'echando la siesta', 'inspeccionando su cama'],
+    zorro: ['explorando su rincón', 'dando saltitos', 'jugando con una pelota', 'descansando', 'comiendo con ganas'],
+    pato: ['nadando en su estanque', 'chapoteando', 'tomando el sol', 'paseando en fila', 'comiendo migas']
+  };
+  var pf = $('#petFoto');
+  $$('#petBtns button').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var tipo = b.dataset.tipo; var info = $('#petInfo');
+      info.textContent = 'Pidiendo foto a la cámara… 📸';
+      cargarFoto(tipo, pf, function () {
+        var l = ESTADOS[tipo];
+        var h = new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+        info.innerHTML = 'Tu ' + esc(tipo) + ' está <strong>' + esc(l[Math.floor(Math.random() * l.length)]) + '</strong>. ¡Se encuentra genial! 🐾<span class="hora">Foto de las ' + h + '</span>';
+      }).catch(function (e) { info.textContent = e.message; });
+    });
+  });
+
+  /* ── Tiempo (Open-Meteo) y moneda (Frankfurter) ── */
+  var WX = { 0: ['☀️', 'Despejado'], 1: ['🌤️', 'Casi despejado'], 2: ['⛅', 'Parcialmente nublado'], 3: ['☁️', 'Nublado'], 45: ['🌫️', 'Niebla'], 48: ['🌫️', 'Niebla'], 51: ['🌦️', 'Llovizna'], 61: ['🌧️', 'Lluvia'], 63: ['🌧️', 'Lluvia'], 65: ['🌧️', 'Lluvia fuerte'], 71: ['🌨️', 'Nieve'], 80: ['🌦️', 'Chubascos'], 95: ['⛈️', 'Tormenta'] };
+  fetch('https://api.open-meteo.com/v1/forecast?latitude=40.4168&longitude=-3.7038&current=temperature_2m,weather_code&timezone=auto')
+    .then(function (r) { return r.json(); }).then(function (d) {
+      var c = d.current, w = WX[c.weather_code] || ['🌡️', 'Tiempo en Madrid'];
+      $('#wxIcon').textContent = w[0]; $('#wxTemp').textContent = Math.round(c.temperature_2m) + '°C'; $('#wxDesc').textContent = w[1] + ' · Madrid';
+    }).catch(function () { $('#wxDesc').textContent = 'Madrid'; });
+
+  fetch('https://api.frankfurter.dev/v1/latest?base=EUR&symbols=USD,GBP')
+    .then(function (r) { return r.json(); }).then(function (d) {
+      $$('.usd').forEach(function (el) {
+        var e = Number(el.dataset.eur);
+        el.textContent = '≈ $' + (e * d.rates.USD).toFixed(0) + ' · £' + (e * d.rates.GBP).toFixed(0);
+      });
+      $('#monedaNota').textContent = 'Cambio orientativo del día (' + d.date + '). Se cobra en euros.';
+    }).catch(function () {});
+
+  /* ── Calendario y reserva ── */
+  var cal = { y: 0, m: 0, desde: null, hasta: null, llenos: {} };
+  var hoy = new Date(); var hoyS = iso(hoy);
+  cal.y = hoy.getFullYear(); cal.m = hoy.getMonth();
+  function iso(d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+  function addDias(s, n) { var d = new Date(s + 'T12:00:00'); d.setDate(d.getDate() + n); return iso(d); }
+  function noches() { return cal.desde && cal.hasta ? Math.round((new Date(cal.hasta + 'T12:00:00') - new Date(cal.desde + 'T12:00:00')) / 864e5) : 0; }
+
+  function renderCal() {
+    var box = $('#cal'); if (!box) return;
+    var primero = new Date(cal.y, cal.m, 1);
+    $('#calTitle').textContent = primero.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' });
+    var html = ['L', 'M', 'X', 'J', 'V', 'S', 'D'].map(function (d) { return '<div class="dw">' + d + '</div>'; }).join('');
+    var offset = (primero.getDay() + 6) % 7;
+    for (var i = 0; i < offset; i++) html += '<button class="vacio" disabled tabindex="-1"></button>';
+    var dias = new Date(cal.y, cal.m + 1, 0).getDate();
+    for (var d = 1; d <= dias; d++) {
+      var s = cal.y + '-' + String(cal.m + 1).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+      var cls = [];
+      var pasado = s < hoyS;
+      if (cal.llenos[s]) cls.push('lleno');
+      if (cal.desde && cal.hasta && s > cal.desde && s < cal.hasta) cls.push('rango');
+      if (s === cal.desde || s === cal.hasta) cls.push('ext');
+      html += '<button type="button" data-d="' + s + '" class="' + cls.join(' ') + '"' + (pasado ? ' disabled' : '') + '>' + d + '</button>';
+    }
+    box.innerHTML = html;
+    var r = $('#selRango');
+    if (cal.desde && cal.hasta) r.textContent = 'Del ' + cal.desde + ' al ' + cal.hasta + ' · ' + noches() + (noches() === 1 ? ' noche' : ' noches');
+    else if (cal.desde) r.textContent = 'Entrada: ' + cal.desde + '. Ahora elige el día de salida.';
+    else r.textContent = 'Elige día de entrada y de salida.';
+    $('#fDesde').value = cal.desde || ''; $('#fHasta').value = cal.hasta || '';
+    actualizarTotal();
+  }
+
+  function rangoLibre(d, h) {
+    for (var s = d; s < h; s = addDias(s, 1)) if (cal.llenos[s]) return false;
+    return true;
+  }
+
+  if ($('#cal')) {
+    $('#cal').addEventListener('click', function (e) {
+      var b = e.target.closest('button[data-d]'); if (!b || b.disabled) return;
+      var s = b.dataset.d;
+      if (!cal.desde || (cal.desde && cal.hasta)) { cal.desde = s; cal.hasta = null; }
+      else if (s > cal.desde) {
+        if (!rangoLibre(cal.desde, s)) { toast('Hay días completos en ese rango. Prueba otras fechas.'); cal.desde = null; cal.hasta = null; }
+        else cal.hasta = s;
+      } else { cal.desde = s; cal.hasta = null; }
+      renderCal();
+    });
+    $('#calPrev').addEventListener('click', function () { cal.m--; if (cal.m < 0) { cal.m = 11; cal.y--; } renderCal(); });
+    $('#calNext').addEventListener('click', function () { cal.m++; if (cal.m > 11) { cal.m = 0; cal.y++; } renderCal(); });
+  }
+
+  function cargarDisponibilidad() {
+    var plan = $('#rPlan').value;
+    api('disponibilidad', { params: { plan: plan, desde: hoyS, dias: 180 } }).then(function (d) {
+      cal.llenos = {}; d.llenos.forEach(function (x) { cal.llenos[x] = 1; });
+      if (cal.desde && cal.hasta && !rangoLibre(cal.desde, cal.hasta)) { cal.desde = cal.hasta = null; toast('Esas fechas están completas en esta habitación.'); }
+      renderCal();
+    }).catch(function () { renderCal(); });
+  }
+
+  function extrasMarcados() { return $$('#extrasChecks input:checked').map(function (i) { return i.value; }); }
+
+  function actualizarTotal() {
+    var box = $('#totalBox'); var n = noches(); var p = C.planes[$('#rPlan').value];
+    if (!n || !p) { box.textContent = 'Elige fechas para ver el precio.'; return; }
+    var li = ['<li>' + esc(p.nombre) + ' × ' + n + ' → ' + eur(p.precio * n) + '</li>'];
+    var total = p.precio * n;
+    extrasMarcados().forEach(function (id) {
+      var e = C.extras[id]; if (!e) return;
+      var imp = e.tipo === 'dia' ? e.precio * n : e.precio; total += imp;
+      li.push('<li>' + esc(e.nombre) + (e.tipo === 'dia' ? ' × ' + n : '') + ' → ' + eur(imp) + '</li>');
+    });
+    box.innerHTML = '<ul>' + li.join('') + '</ul><span class="t">Total: ' + eur(total) + '</span>';
+  }
+
+  function elegirPlan(id) {
+    $('#rPlan').value = id;
+    $$('.room').forEach(function (r) { r.classList.toggle('sel', r.dataset.plan === id); });
+    cargarDisponibilidad();
+  }
+  if ($('#rPlan')) {
+    $('#rPlan').addEventListener('change', function () { elegirPlan(this.value); });
+    $('#extrasChecks').addEventListener('change', actualizarTotal);
+    $$('.elegir').forEach(function (b) {
+      b.addEventListener('click', function () { elegirPlan(b.dataset.plan); $('#reservar').scrollIntoView({ behavior: 'smooth' }); });
+    });
+    elegirPlan($('#rPlan').value);
+  }
+
+  if ($('#formReserva')) {
+    $('#formReserva').addEventListener('submit', function (e) {
+      e.preventDefault();
+      var msg = $('#resMsg'); setMsg(msg, '');
+      if (!cal.desde || !cal.hasta) { setMsg(msg, 'Elige las fechas en el calendario.'); return; }
+      var btn = $('#btnReservar'); btn.disabled = true;
+      api('reservas', { method: 'POST', body: {
+        nombre: $('#rNombre').value, email: $('#rEmail').value, mascota: $('#rMascota').value,
+        especie: $('#rEspecie').value, plan: $('#rPlan').value, desde: cal.desde, hasta: cal.hasta, extras: extrasMarcados()
+      } }).then(function (d) {
+        setMsg(msg, d.mensaje + ' Total: ' + eur(d.total), true);
+        toast('¡Reserva enviada! 🐾');
+        cal.desde = cal.hasta = null; $$('#extrasChecks input').forEach(function (i) { i.checked = false; });
+        cargarDisponibilidad(); cargarUltimas(); cargarMias();
+      }).catch(function (err) { setMsg(msg, err.message); }).then(function () { btn.disabled = false; });
+    });
+  }
+
+  /* ── Listas de reservas ── */
+  function itemReserva(r, staff) {
+    var ex = r.extras && r.extras.length ? '<p>Extras: ' + esc(r.extras.join(', ')) + '</p>' : '';
+    var h = '<article class="caja item"><h4>' + esc(r.mascota) + ' <span class="badge ' + esc(r.estado) + '">' + esc(r.estado) + '</span></h4>' +
+      '<p>' + esc(r.especie) + ' · Habitación ' + esc(r.plan) + '</p><p>' + esc(r.desde) + ' → ' + esc(r.hasta) + '</p>' + ex +
+      '<p>Dueño: ' + esc(r.dueno) + (staff && r.email ? ' · ' + esc(r.email) : '') + '</p>';
+    if (staff) {
+      h += '<p><strong>' + eur(r.total) + '</strong> · creada ' + esc(r.creada) + '</p><div class="acciones">' +
+        ['pendiente', 'confirmada', 'cancelada'].map(function (s) {
+          return '<button class="btn btn-mini ' + (r.estado === s ? 'btn-amarillo' : 'btn-claro') + '" data-id="' + r.id + '" data-estado="' + s + '">' + s + '</button>';
+        }).join('') + '</div>';
+    }
+    return h + '</article>';
+  }
+  function lista(el, arr, fn, vacio) {
+    el.innerHTML = arr.length ? arr.map(fn).join('') : '<p class="vacio-txt">' + vacio + '</p>';
+  }
+
+  function cargarUltimas() {
+    var el = $('#ultimas'); if (!el) return;
+    api('reservas').then(function (a) { lista(el, a, function (r) { return itemReserva(r, false); }, 'Todavía no hay reservas. ¡Sé el primero!'); })
+      .catch(function (e) { el.innerHTML = '<p class="vacio-txt">' + esc(e.message) + '</p>'; });
+  }
+  function cargarMias() {
+    if (!C.user.logged) return;
+    var el = $('#misList');
+    api('mis-reservas').then(function (a) { lista(el, a, function (r) { return itemReserva(r, false); }, 'Aún no tienes reservas.'); }).catch(function () {});
+  }
+
+  /* ── Reseñas ── */
+  var valor = 0;
+  function pintarStars() { $$('#starPick .star').forEach(function (s) { var v = +s.dataset.v; s.textContent = v <= valor ? '★' : '☆'; s.classList.toggle('on', v === valor); }); }
+  function cargarResenas() {
+    var res = $('#revResumen'); if (!res) return;
+    api('resenas').then(function (d) {
+      res.innerHTML = d.total
+        ? '<div class="media">' + d.media.toFixed(1) + '</div><div class="estrellas">' + stars(Math.round(d.media)) + '</div><p>' + d.total + (d.total === 1 ? ' reseña' : ' reseñas') + '</p>'
+        : '<p>Aún no hay reseñas.<br>¡Escribe la primera!</p>';
+      lista($('#revList'), d.items, function (r) {
+        return '<article class="caja item"><div class="estrellas">' + stars(r.rating) + '</div><p>«' + esc(r.texto) + '»</p><p><strong>' + esc(r.autor) + '</strong> · ' + esc(r.fecha) + (r.mia ? ' · <span class="badge">tuya</span>' : '') + '</p></article>';
+      }, '');
+      var mia = d.items.filter(function (r) { return r.mia; })[0];
+      if (mia && !valor) { valor = mia.rating; $('#revTexto').value = mia.texto; pintarStars(); }
+    }).catch(function (e) { res.textContent = e.message; });
+  }
+  if ($('#starPick')) {
+    $('#starPick').addEventListener('click', function (e) { var b = e.target.closest('.star'); if (b) { valor = +b.dataset.v; pintarStars(); } });
+    pintarStars();
+    $('#formResena').addEventListener('submit', function (e) {
+      e.preventDefault(); var msg = $('#revMsg');
+      if (!valor) { setMsg(msg, 'Elige de 1 a 5 estrellas.'); return; }
+      api('resenas', { method: 'POST', body: { rating: valor, texto: $('#revTexto').value } }).then(function (d) {
+        setMsg(msg, d.actualizada ? 'Reseña actualizada ✅' : '¡Gracias por tu reseña! 🐾', true); cargarResenas();
+      }).catch(function (err) { setMsg(msg, err.message); });
+    });
+  }
+
+  /* ── Contacto ── */
+  if ($('#formContacto')) {
+    $('#formContacto').addEventListener('submit', function (e) {
+      e.preventDefault(); var msg = $('#contMsg'); setMsg(msg, '');
+      api('contacto', { method: 'POST', body: {
+        nombre: $('#cNombre').value, email: $('#cEmail').value, asunto: $('#cAsunto').value, mensaje: $('#cMensaje').value, web: $('#cWeb').value
+      } }).then(function (d) {
+        setMsg(msg, d.mensaje || 'Enviado', true); toast('Mensaje enviado ✉️');
+        $('#cAsunto').value = ''; $('#cMensaje').value = '';
+        if (C.user.staff) cargarPanel();
+      }).catch(function (err) { setMsg(msg, err.message); });
+    });
+  }
+
+  /* ── Panel del personal ── */
+  function cargarPanel() {
+    if (!C.user.staff) return;
+    api('panel').then(function (d) {
+      lista($('#panelRes'), d.reservas, function (r) { return itemReserva(r, true); }, 'No hay reservas.');
+      lista($('#panelMsg'), d.mensajes, function (m) {
+        return '<article class="caja item"><h4>' + esc(m.asunto) + '</h4><p>' + esc(m.texto) + '</p><p><strong>' + esc(m.nombre) + '</strong> · ' + esc(m.email) + ' · ' + esc(m.fecha) + '</p></article>';
+      }, 'No hay mensajes.');
+    }).catch(function (e) { toast(e.message); });
+  }
+  if ($('#panelRes')) {
+    $('#panelRes').addEventListener('click', function (e) {
+      var b = e.target.closest('button[data-estado]'); if (!b) return;
+      api('reservas/' + b.dataset.id + '/estado', { method: 'POST', body: { estado: b.dataset.estado } })
+        .then(function () { toast('Estado actualizado'); cargarPanel(); cargarUltimas(); cargarDisponibilidad(); })
+        .catch(function (err) { toast(err.message); });
+    });
+  }
+
+  /* ── Inicio ── */
+  cargarUltimas(); cargarResenas(); cargarMias(); cargarPanel();
 })();
