@@ -1,8 +1,8 @@
 <?php
 /**
  * Plugin Name: Hotel 5 Huellas API
- * Description: API REST v5: habitaciones, servicios extra, reservas, usuarios y roles, reseñas, contacto, animales (proxy) y panel del personal.
- * Version: 5.0.0
+ * Description: API REST v6: habitaciones, extras, reservas, usuarios y roles, mis mascotas, perfil, reseñas, contacto, fotos de animales (proxy), estadísticas y panel del personal.
+ * Version: 6.0.0
  */
 if (!defined('ABSPATH')) exit;
 
@@ -28,7 +28,7 @@ function h5_extras() {
     ];
 }
 
-function h5_especies() { return ['perro', 'gato', 'zorro', 'pato', 'otro']; }
+function h5_especies() { return ['perro', 'gato', 'pajaro', 'conejo', 'hamster', 'otro']; }
 
 /* ───────────── Roles y permisos ───────────── */
 
@@ -73,10 +73,11 @@ function h5_rol_label($user) {
 
 function h5_user_info() {
     $u = wp_get_current_user();
-    if (!$u->exists()) return ['logged' => false, 'name' => '', 'rol' => '', 'staff' => false];
+    if (!$u->exists()) return ['logged' => false, 'name' => '', 'email' => '', 'rol' => '', 'staff' => false];
     return [
         'logged' => true,
         'name'   => $u->display_name,
+        'email'  => $u->user_email,
         'rol'    => h5_rol_label($u),
         'staff'  => current_user_can('hotel_ver_reservas'),
     ];
@@ -180,6 +181,7 @@ add_action('rest_api_init', function () {
 
     register_rest_route($ns, '/planes',    ['methods' => 'GET',  'callback' => function () { return array_values(h5_planes()); }, 'permission_callback' => $pub]);
     register_rest_route($ns, '/servicios', ['methods' => 'GET',  'callback' => function () { return array_values(h5_extras()); }, 'permission_callback' => $pub]);
+    register_rest_route($ns, '/estadisticas', ['methods' => 'GET', 'callback' => 'h5_r_stats', 'permission_callback' => $pub]);
     register_rest_route($ns, '/disponibilidad', ['methods' => 'GET', 'callback' => 'h5_r_disponibilidad', 'permission_callback' => $pub]);
     register_rest_route($ns, '/reservas',  ['methods' => 'POST', 'callback' => 'h5_r_reservar',   'permission_callback' => $pub]);
     register_rest_route($ns, '/reservas',  ['methods' => 'GET',  'callback' => 'h5_r_ultimas',    'permission_callback' => $pub]);
@@ -190,11 +192,22 @@ add_action('rest_api_init', function () {
     register_rest_route($ns, '/resenas',   ['methods' => 'POST', 'callback' => 'h5_r_resenar',    'permission_callback' => function () { return current_user_can('hotel_resenar'); }]);
     register_rest_route($ns, '/contacto',  ['methods' => 'POST', 'callback' => 'h5_r_contacto',   'permission_callback' => $pub]);
     register_rest_route($ns, '/animal',    ['methods' => 'GET',  'callback' => 'h5_r_animal',     'permission_callback' => $pub]);
+    register_rest_route($ns, '/mascotas',  ['methods' => 'GET',  'callback' => 'h5_r_mascotas',   'permission_callback' => $logged]);
+    register_rest_route($ns, '/mascotas',  ['methods' => 'POST', 'callback' => 'h5_r_mascota_add', 'permission_callback' => $logged]);
+    register_rest_route($ns, '/mascotas/(?P<id>[a-z0-9]+)', ['methods' => 'DELETE', 'callback' => 'h5_r_mascota_del', 'permission_callback' => $logged]);
+    register_rest_route($ns, '/perfil',    ['methods' => 'POST', 'callback' => 'h5_r_perfil',     'permission_callback' => $logged]);
     register_rest_route($ns, '/auth/yo',       ['methods' => 'GET',  'callback' => function () { return h5_user_info(); }, 'permission_callback' => $pub]);
     register_rest_route($ns, '/auth/login',    ['methods' => 'POST', 'callback' => 'h5_r_login',    'permission_callback' => $pub]);
     register_rest_route($ns, '/auth/registro', ['methods' => 'POST', 'callback' => 'h5_r_registro', 'permission_callback' => $pub]);
     register_rest_route($ns, '/auth/logout',   ['methods' => 'POST', 'callback' => 'h5_r_logout',   'permission_callback' => $pub]);
 });
+
+/* ── Estadísticas para la portada ── */
+function h5_r_stats() {
+    $c = wp_count_posts('hotel_reserva');
+    $rs = h5_r_resenas();
+    return ['reservas' => isset($c->publish) ? (int) $c->publish : 0, 'resenas' => $rs['total'], 'media' => $rs['media']];
+}
 
 /* ── Disponibilidad ── */
 function h5_r_disponibilidad(WP_REST_Request $r) {
@@ -290,7 +303,7 @@ function h5_reserva_array($id, $completo = false) {
 }
 
 function h5_r_ultimas() {
-    $ids = get_posts(['post_type' => 'hotel_reserva', 'post_status' => 'publish', 'numberposts' => 8, 'fields' => 'ids',
+    $ids = get_posts(['post_type' => 'hotel_reserva', 'post_status' => 'publish', 'numberposts' => 6, 'fields' => 'ids',
         'orderby' => 'date', 'order' => 'DESC', 'meta_query' => [['key' => 'estado', 'value' => 'cancelada', 'compare' => '!=']]]);
     return array_map('h5_reserva_array', $ids);
 }
@@ -313,7 +326,7 @@ function h5_r_estado(WP_REST_Request $r) {
 function h5_r_panel() {
     $out = ['reservas' => [], 'mensajes' => []];
     if (current_user_can('hotel_ver_reservas')) {
-        $ids = get_posts(['post_type' => 'hotel_reserva', 'post_status' => 'publish', 'numberposts' => 40, 'fields' => 'ids', 'orderby' => 'date', 'order' => 'DESC']);
+        $ids = get_posts(['post_type' => 'hotel_reserva', 'post_status' => 'publish', 'numberposts' => 60, 'fields' => 'ids', 'orderby' => 'date', 'order' => 'DESC']);
         $out['reservas'] = array_map(function ($id) { return h5_reserva_array($id, true); }, $ids);
     }
     if (current_user_can('hotel_ver_mensajes')) {
@@ -386,27 +399,82 @@ function h5_r_contacto(WP_REST_Request $r) {
     return ['ok' => true, 'mensaje' => '¡Mensaje enviado! Te responderemos pronto.'];
 }
 
-/* ── Animales (proxy servidor → APIs públicas) ── */
+/* ── Fotos de animales (proxy servidor → APIs públicas) ── */
 function h5_r_animal(WP_REST_Request $r) {
-    $l = h5_limit('animal', 60);
+    $l = h5_limit('animal', 120);
     if (is_wp_error($l)) return $l;
     $tipo = sanitize_key($r->get_param('tipo')) ?: 'perro';
     $fuentes = [
-        'perro' => ['https://dog.ceo/api/breeds/image/random', function ($j) { return $j['message'] ?? null; }],
-        'gato'  => ['https://api.thecatapi.com/v1/images/search', function ($j) { return $j[0]['url'] ?? null; }],
-        'zorro' => ['https://randomfox.ca/floof/', function ($j) { return $j['image'] ?? null; }],
-        'pato'  => ['https://random-d.uk/api/v2/random', function ($j) { return $j['url'] ?? null; }],
+        'perro'  => ['https://dog.ceo/api/breeds/image/random', function ($j) { return $j['message'] ?? null; }],
+        'gato'   => ['https://api.thecatapi.com/v1/images/search', function ($j) { return $j[0]['url'] ?? null; }],
+        'pajaro' => ['https://shibe.online/api/birds?count=1', function ($j) { return $j[0] ?? null; }],
+        'conejo' => ['https://api.bunnies.io/v2/loop/random/?media=gif,png', function ($j) { return $j['media']['poster'] ?? ($j['media']['gif'] ?? null); }],
     ];
     if (!isset($fuentes[$tipo])) return h5_err('h5_val', 'Animal no disponible.');
     $resp = wp_remote_get($fuentes[$tipo][0], ['timeout' => 8, 'headers' => ['Accept' => 'application/json']]);
-    if (is_wp_error($resp) || wp_remote_retrieve_response_code($resp) !== 200) return h5_err('h5_ext', 'El servicio de fotos no responde ahora mismo.', 502);
+    if (is_wp_error($resp) || wp_remote_retrieve_response_code($resp) !== 200) return h5_err('h5_ext', 'La cámara de este animal no responde ahora mismo.', 502);
     $j = json_decode(wp_remote_retrieve_body($resp), true);
     $url = is_array($j) ? $fuentes[$tipo][1]($j) : null;
-    if (!$url || !preg_match('#^https://#', $url)) return h5_err('h5_ext', 'Respuesta inesperada del servicio de fotos.', 502);
+    if (is_string($url)) $url = preg_replace('#^http://#', 'https://', $url);
+    if (!is_string($url) || !preg_match('#^https://#', $url)) return h5_err('h5_ext', 'Respuesta inesperada del servicio de fotos.', 502);
     return ['tipo' => $tipo, 'url' => esc_url_raw($url)];
 }
 
-/* ── Usuarios ── */
+/* ── Mis mascotas ── */
+function h5_mascotas_de($uid) {
+    $m = get_user_meta($uid, 'h5_mascotas', true);
+    return is_array($m) ? array_values($m) : [];
+}
+
+function h5_r_mascotas() {
+    return h5_mascotas_de(get_current_user_id());
+}
+
+function h5_r_mascota_add(WP_REST_Request $r) {
+    $l = h5_limit('mascota', 20);
+    if (is_wp_error($l)) return $l;
+    $nombre = h5_texto($r->get_param('nombre'), 1, 40, 'nombre');
+    if (is_wp_error($nombre)) return $nombre;
+    $especie = sanitize_key($r->get_param('especie'));
+    if (!in_array($especie, h5_especies(), true)) return h5_err('h5_val', 'Especie no válida.');
+    $uid = get_current_user_id();
+    $m = h5_mascotas_de($uid);
+    if (count($m) >= 10) return h5_err('h5_val', 'Máximo 10 mascotas por cuenta.');
+    $m[] = ['id' => substr(md5(uniqid('', true)), 0, 10), 'nombre' => $nombre, 'especie' => $especie];
+    update_user_meta($uid, 'h5_mascotas', $m);
+    return ['ok' => true, 'mascotas' => $m];
+}
+
+function h5_r_mascota_del(WP_REST_Request $r) {
+    $id = sanitize_key($r['id']);
+    $uid = get_current_user_id();
+    $m = array_values(array_filter(h5_mascotas_de($uid), function ($x) use ($id) { return $x['id'] !== $id; }));
+    update_user_meta($uid, 'h5_mascotas', $m);
+    return ['ok' => true, 'mascotas' => $m];
+}
+
+/* ── Perfil ── */
+function h5_r_perfil(WP_REST_Request $r) {
+    $l = h5_limit('perfil', 8);
+    if (is_wp_error($l)) return $l;
+    $u = wp_get_current_user();
+    $nombre = h5_texto($r->get_param('nombre'), 2, 40, 'nombre');
+    if (is_wp_error($nombre)) return $nombre;
+    $datos = ['ID' => $u->ID, 'display_name' => $nombre];
+    $nueva = (string) $r->get_param('clave_nueva');
+    if ($nueva !== '') {
+        if (!wp_check_password((string) $r->get_param('clave_actual'), $u->user_pass, $u->ID)) {
+            return h5_err('h5_auth', 'La contraseña actual no es correcta.', 403);
+        }
+        if (strlen($nueva) < 8) return h5_err('h5_val', 'La contraseña nueva debe tener al menos 8 caracteres.');
+        $datos['user_pass'] = $nueva;
+    }
+    $res = wp_update_user($datos);
+    if (is_wp_error($res)) return h5_err('h5_db', 'No se pudo guardar el perfil.', 500);
+    return ['ok' => true, 'name' => $nombre, 'clave' => $nueva !== ''];
+}
+
+/* ── Sesión ── */
 function h5_r_login(WP_REST_Request $r) {
     $l = h5_limit('login', 8);
     if (is_wp_error($l)) return $l;
@@ -417,7 +485,8 @@ function h5_r_login(WP_REST_Request $r) {
         $u = get_user_by('email', $usuario);
         if ($u) $usuario = $u->user_login;
     }
-    $user = wp_signon(['user_login' => $usuario, 'user_password' => $clave, 'remember' => true], '');
+    $recordar = filter_var($r->get_param('recordar'), FILTER_VALIDATE_BOOLEAN);
+    $user = wp_signon(['user_login' => $usuario, 'user_password' => $clave, 'remember' => $recordar], '');
     if (is_wp_error($user)) return h5_err('h5_auth', 'Usuario o contraseña incorrectos.', 401);
     wp_set_current_user($user->ID);
     return ['ok' => true, 'name' => $user->display_name, 'rol' => h5_rol_label($user)];
