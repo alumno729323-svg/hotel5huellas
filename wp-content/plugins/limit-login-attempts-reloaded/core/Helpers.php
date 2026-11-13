@@ -1,0 +1,997 @@
+<?php
+
+namespace LLAR\Core;
+
+use LLAR\Lib\CidrCheck;
+use LLAR\Core\Mail\Mailer;
+
+if ( !defined( 'ABSPATH' ) ) exit;
+
+class Helpers {
+
+	/**
+	 * @param string $msg
+	 * @param bool $is_error
+	 */
+	public static function show_message( $msg = '', $is_error = false ) {
+		if ( empty( $msg ) ) {
+			return;
+		}
+
+		$class = $is_error ? 'error' : 'updated';
+		echo '<div id="message" class="' . $class . ' fade"><p>' . $msg . '</p></div>';
+	}
+
+	/**
+	 * @param $log
+	 *
+	 * @return array
+	 */
+	public static function sorted_log_by_date( $log ) {
+		$new_log = array();
+
+		if ( ! is_array( $log ) || empty( $log ) ) {
+			return $new_log;
+		}
+
+		foreach ( $log as $ip => $users ) {
+
+			if ( ! empty( $users ) ) {
+				foreach ( $users as $user_name => $info ) {
+
+					if ( is_array( $info ) && ! empty( $info['date'] ) && ! empty( $info['counter'] ) ) { // For new plugin version
+						$new_log[ $info['date'] ] = array(
+							'ip'       => $ip,
+							'username' => $user_name,
+							'counter'  => $info['counter'],
+							'gateway'  => isset( $info['gateway'] ) ? $info['gateway'] : '-',
+							'unlocked' => ! empty( $info['unlocked'] ),
+						);
+						continue;
+					}
+
+					if ( ! is_array( $info ) ) { // For old plugin version
+						$new_log[0] = array(
+							'ip'       => $ip,
+							'username' => $user_name,
+							'counter'  => $info,
+							'gateway'  => '-',
+							'unlocked' => false,
+						);
+					}
+				}
+			}
+		}
+
+		krsort( $new_log );
+
+		return $new_log;
+	}
+
+	public static function get_countries_list() {
+
+		if ( ! ( $countries = require LLA_PLUGIN_DIR . '/resources/countries.php' ) ) {
+
+			return array();
+		}
+
+		asort( $countries );
+
+		return $countries;
+	}
+
+	public static function get_continent_list() {
+
+		if ( ! ( $continent = require LLA_PLUGIN_DIR . '/resources/continent.php' ) ) {
+
+			return array();
+		}
+
+		asort( $continent );
+
+		return $continent;
+	}
+
+	/**
+	 * @param $ip
+	 * @param $cidr
+	 *
+	 * @return bool
+	 */
+	public static function check_ip_cidr( $ip, $cidr ) {
+
+		if ( ! $ip || ! $cidr ) {
+			return false;
+		}
+
+		$cidr_checker = new CidrCheck();
+
+		return $cidr_checker->match( $ip, $cidr );
+	}
+
+	/**
+	 * Checks if the plugin is installed as Must Use plugin
+	 *
+	 * @return bool
+	 */
+	public static function is_mu() {
+
+		return ( strpos( LLA_PLUGIN_DIR, 'mu-plugins' ) !== false );
+	}
+
+	/**
+	 * @param $content
+	 *
+	 * @return string|string[]|null
+	 */
+	public static function deslash( $content ) {
+
+		$content = preg_replace( "/\\\+'/", "'", $content );
+		$content = preg_replace( '/\\\+"/', '"', $content );
+		$content = preg_replace( '/\\\+/', '\\', $content );
+
+		return $content;
+	}
+
+	// Solution prevents double quotes problem in json string
+	public static function sanitize_stripslashes_deep( $value )
+	{
+		if ( is_array( $value ) ) {
+			return array_map( [self::class, 'sanitize_stripslashes_deep'], $value );
+		}
+
+		if ( is_bool( $value ) || is_null( $value ) ) {
+			return $value;
+		}
+
+		return sanitize_textarea_field( stripslashes( (string)$value ) );
+	}
+
+
+	public static function is_auto_update_enabled() {
+		$auto_update_plugins = get_site_option( 'auto_update_plugins' );
+		return is_array( $auto_update_plugins ) && in_array( LLA_PLUGIN_BASENAME, $auto_update_plugins );
+	}
+
+	public static function is_block_automatic_update_disabled() {
+
+        if ( ( defined( 'DISALLOW_FILE_MODS' ) && DISALLOW_FILE_MODS )
+            || ( defined( 'DOING_CRON' ) && DOING_CRON ) ) {
+            return true;
+        }
+
+        return apply_filters( 'automatic_updater_disabled', false ) || ! apply_filters( 'auto_update_plugin', true, 10, 2 );
+	}
+
+	public static function get_wordpress_version() {
+		global $wp_version;
+		return $wp_version;
+	}
+
+	/**
+	 * @return bool
+	 */
+	public static function is_network_mode() {
+		if ( !is_multisite() ) return false;
+
+		require_once ABSPATH.'wp-admin/includes/plugin.php';
+
+		return is_plugin_active_for_network( 'limit-login-attempts-reloaded/limit-login-attempts-reloaded.php' );
+	}
+
+	/**
+	 * @return bool
+	 */
+	public static function allow_local_options() {
+
+		if( !self::is_network_mode() ) return true;
+
+		return get_site_option( 'limit_login_allow_local_options', false );
+	}
+
+	/**
+	 * @return bool
+	 */
+	public static function use_local_options() {
+
+		if( !self::is_network_mode() ) return true;
+
+		return get_site_option( 'limit_login_allow_local_options', false ) &&
+		       get_option( 'limit_login_use_local_options', false );
+	}
+
+	/**
+	 * @param $new_app_config
+	 * @param false $update_created_at
+	 *
+	 * @return false
+	 */
+	public static function cloud_app_update_config( $new_app_config, $update_created_at = false ) {
+		if( !$new_app_config ) return false;
+
+		$previous_app_config = Config::get( 'app_config' );
+
+		if( $active_app_config = $previous_app_config ) {
+
+			foreach ( $active_app_config['settings'] as $key => $info ) {
+
+				if( array_key_exists( $key, $new_app_config['settings'] ) ) {
+
+					if( !empty( $new_app_config['settings'][$key]['options'] ) &&
+					    !in_array( $info['value'], $new_app_config['settings'][$key]['options'] ) ) {
+
+						continue;
+					}
+
+					$new_app_config['settings'][$key]['value'] = $info['value'];
+				}
+			}
+
+		}
+
+		if( $update_created_at )
+			$new_app_config['created_at'] = time();
+
+		Config::update( 'app_config', $new_app_config );
+
+		// The /info payload may change with the app config — drop the cached
+		// exhausted flag for both the previous and the new app id.
+		LimitLoginAttempts::clear_mc_exhausted_cache( $previous_app_config );
+		LimitLoginAttempts::clear_mc_exhausted_cache( $new_app_config );
+	}
+
+	/**
+	 * @param $filepath
+	 *
+	 * @return bool
+	 */
+	public static function is_writable( $filepath ) {
+		return file_exists( $filepath ) && wp_is_writable( $filepath );
+	}
+
+	public static function ip_in_range( $ip, $list ) {
+
+		foreach ( $list as $range ) {
+
+			$range = array_map('trim', explode('-', $range) );
+			if ( count( $range ) == 1 ) {
+
+				// CIDR
+				if( strpos( $range[0], '/' ) !== false && self::check_ip_cidr( $ip, $range[0] ) ) {
+
+					return true;
+				}
+				// Single IP
+				else if ( (string)$ip === (string)$range[0] ) {
+
+					return true;
+				}
+
+			} else {
+
+				$low = ip2long( $range[0] );
+				$high = ip2long( $range[1] );
+				$needle = ip2long( $ip );
+
+				if ( $low === false || $high === false || $needle === false )
+					continue;
+
+				$low = (float)sprintf("%u",$low);
+				$high = (float)sprintf("%u",$high);
+				$needle = (float)sprintf("%u",$needle);
+
+				if ( $needle >= $low && $needle <= $high )
+					return true;
+			}
+		}
+
+		return false;
+	}
+
+	public static function detect_ip_address( $trusted_ip_origins ) {
+		if( empty( $trusted_ip_origins ) || !is_array( $trusted_ip_origins ) ) {
+
+			$trusted_ip_origins = array();
+		}
+
+		if( !in_array( 'REMOTE_ADDR', $trusted_ip_origins ) ) {
+
+			$trusted_ip_origins[] = 'REMOTE_ADDR';
+		}
+
+		$ip = '';
+		foreach ( $trusted_ip_origins as $origin ) {
+
+			if( isset( $_SERVER[$origin] ) && !empty( $_SERVER[$origin] ) ) {
+
+				if( strpos( $_SERVER[$origin], ',' ) !== false ) {
+
+					$origin_ips = explode( ',', $_SERVER[$origin] );
+					$origin_ips = array_map( 'trim', $origin_ips );
+
+					if( $origin_ips ) {
+
+						foreach ($origin_ips as $check_ip) {
+
+							if( self::is_ip_valid( $check_ip ) ) {
+
+								$ip = $check_ip;
+								break 2;
+							}
+						}
+					}
+				}
+
+				if( self::is_ip_valid( $_SERVER[$origin] ) ) {
+
+					$ip = $_SERVER[$origin];
+					break;
+				}
+			}
+		}
+
+		$ip = preg_replace('/^(\d+\.\d+\.\d+\.\d+):\d+$/', '\1', $ip);
+
+		return $ip;
+	}
+
+	public static function get_all_ips() {
+
+		$ips = array();
+
+		foreach ( $_SERVER as $key => $value ) {
+
+			if( in_array( $key, array( 'SERVER_ADDR' ) ) ) continue;
+
+			// If REMOTE_ADDR contains multiple values (comma-separated), keep only the first before validation
+			if ( $key === 'REMOTE_ADDR' && strpos( $value, ',' ) !== false ) {
+
+				$parts = explode( ',', $value );
+				$value = trim( $parts[0] );
+			}
+
+			if( $valid_ip = self::is_ip_valid( $value ) ) {
+
+				$ips[$key] = $valid_ip;
+			}
+		}
+
+		if( !empty( $_SERVER['HTTP_X_FORWARDED_FOR'] ) && !array_key_exists( 'HTTP_X_FORWARDED_FOR', $ips ) ) {
+
+			$sanitized_xff = self::sanitize_forwarded_for( $_SERVER['HTTP_X_FORWARDED_FOR'] );
+
+			if ( '' !== $sanitized_xff ) {
+				$ips['HTTP_X_FORWARDED_FOR'] = $sanitized_xff;
+			}
+		}
+
+		return $ips;
+	}
+
+	/**
+	 * Sanitize a raw X-Forwarded-For header for outbound payloads.
+	 *
+	 * The header is attacker-controlled: it must never be embedded verbatim.
+	 * Keep the first valid IP of the chain; otherwise keep a sanitized,
+	 * UTF-8-safe, length-capped copy so the value can always be serialised.
+	 *
+	 * @param mixed $value Raw header value.
+	 * @return string
+	 */
+	public static function sanitize_forwarded_for( $value ) {
+		if ( ! is_string( $value ) || '' === $value ) {
+			return '';
+		}
+
+		foreach ( explode( ',', $value ) as $part ) {
+			$part  = trim( $part );
+			$valid = self::is_ip_valid( $part );
+			if ( $valid ) {
+				return $valid;
+			}
+		}
+
+		$clean = sanitize_text_field( $value );
+		// sanitize_text_field does not guarantee valid UTF-8: strip invalid
+		// sequences so the value can always be serialised into the payload.
+		$clean = wp_check_invalid_utf8( $clean, true );
+		if ( mb_strlen( $clean ) > 253 ) {
+			$clean = mb_substr( $clean, 0, 253 );
+		}
+
+		return $clean;
+	}
+
+	/**
+	 * Sanitize the current request's User-Agent for outbound payloads.
+	 *
+	 * The header is attacker-controlled and may carry invalid UTF-8; it must
+	 * never be embedded verbatim in a serialised payload.
+	 *
+	 * @return string
+	 */
+	public static function sanitize_user_agent() {
+		if ( empty( $_SERVER['HTTP_USER_AGENT'] ) || ! is_string( $_SERVER['HTTP_USER_AGENT'] ) ) {
+			return '';
+		}
+
+		// sanitize_text_field does not guarantee valid UTF-8: strip invalid
+		// sequences so the value can always be serialised into the payload.
+		return wp_check_invalid_utf8( sanitize_text_field( wp_unslash( $_SERVER['HTTP_USER_AGENT'] ) ), true );
+	}
+
+	public static function is_ip_valid( $ip ) {
+		if( empty( $ip ) ) return false;
+
+		return filter_var( $ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6 ) ?:
+			filter_var( preg_replace('/^(\d+\.\d+\.\d+\.\d+):\d+$/', '\1', $ip ), FILTER_VALIDATE_IP, FILTER_FLAG_IPV4 );
+	}
+
+	/**
+	 * Mask an IPv6 address to a network prefix (leftmost bits kept).
+	 *
+	 * @param string $ip     IPv6 address.
+	 * @param int    $prefix Prefix length (0–128). Default 64.
+	 * @return string|false Network address, or false on failure.
+	 */
+	public static function ipv6_network_address( $ip, $prefix = 64 ) {
+		if ( ! function_exists( 'inet_pton' ) || ! function_exists( 'inet_ntop' ) ) {
+			return false;
+		}
+
+		$binary = inet_pton( $ip );
+		if ( false === $binary || 16 !== strlen( $binary ) ) {
+			return false;
+		}
+
+		$prefix     = max( 0, min( 128, (int) $prefix ) );
+		$full_bytes = (int) floor( $prefix / 8 );
+		$rem_bits   = $prefix % 8;
+		$masked     = substr( $binary, 0, $full_bytes );
+
+		if ( $rem_bits > 0 && $full_bytes < 16 ) {
+			$mask_byte = ( 0xFF << ( 8 - $rem_bits ) ) & 0xFF;
+			$masked   .= chr( ord( $binary[ $full_bytes ] ) & $mask_byte );
+			++$full_bytes;
+		}
+
+		if ( $full_bytes < 16 ) {
+			$masked .= str_repeat( "\0", 16 - $full_bytes );
+		}
+
+		$network = inet_ntop( $masked );
+		return false !== $network ? $network : false;
+	}
+
+	/**
+	 * Normalize an IP for local retries / lockout table keys.
+	 *
+	 * IPv6 end sites are typically allocated a /64. Keying retries on the full
+	 * address lets an attacker rotate interface IDs inside one /64 and bypass
+	 * the lockout. Collapse global IPv6 to the network prefix (default /64,
+	 * filterable via llar_ipv6_rate_limit_prefix) without a "/64" suffix.
+	 *
+	 * IPv4 is unchanged. IPv4-mapped (::ffff:a.b.c.d) and deprecated
+	 * IPv4-compatible (::a.b.c.d) forms are unmapped to the embedded IPv4 so
+	 * dual-stack listeners do not collapse clients into the key "::".
+	 * Loopback ::1 stays ::1.
+	 *
+	 * Default prefix is /64 (filter: llar_ipv6_rate_limit_prefix). Owners of
+	 * larger delegations (/56, /48) can still rotate /64s — sites expecting
+	 * that threat model should lower the prefix (e.g. 56) via the filter.
+	 * Trade-off: clients sharing one prefix share the retry budget.
+	 *
+	 * Prefix values are clamped to 32–128. Returning 0 from the filter would
+	 * otherwise collapse every IPv6 client into the key "::". The floor /32 is
+	 * a safety bound, not a recommendation: it pools an enormous address
+	 * space into one shared retry budget.
+	 *
+	 * @param string $ip Client IP.
+	 * @return string
+	 */
+	public static function normalize_ip_for_rate_limit( $ip ) {
+		$ip = is_string( $ip ) ? trim( $ip ) : '';
+		if ( '' === $ip ) {
+			return '';
+		}
+
+		if ( filter_var( $ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4 ) ) {
+			return $ip;
+		}
+
+		if ( ! filter_var( $ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6 ) ) {
+			return $ip;
+		}
+
+		if ( ! function_exists( 'inet_pton' ) || ! function_exists( 'inet_ntop' ) ) {
+			return $ip;
+		}
+
+		$binary = inet_pton( $ip );
+		if ( false === $binary || 16 !== strlen( $binary ) ) {
+			return $ip;
+		}
+
+		// IPv4-mapped IPv6 (::ffff:0:0/96) — use the embedded IPv4 as the key.
+		if ( "\0\0\0\0\0\0\0\0\0\0\xff\xff" === substr( $binary, 0, 12 ) ) {
+			$v4 = inet_ntop( substr( $binary, 12 ) );
+			if ( false !== $v4 ) {
+				return $v4;
+			}
+		}
+
+		// Loopback must not collapse to "::" under a /64 mask.
+		$loopback = inet_pton( '::1' );
+		if ( false !== $loopback && $loopback === $binary ) {
+			return '::1';
+		}
+
+		// Deprecated IPv4-compatible IPv6 (::a.b.c.d, first 96 bits zero).
+		if ( "\0\0\0\0\0\0\0\0\0\0\0\0" === substr( $binary, 0, 12 ) ) {
+			$v4 = inet_ntop( substr( $binary, 12 ) );
+			if ( false !== $v4 && '0.0.0.0' !== $v4 ) {
+				return $v4;
+			}
+		}
+
+		$network = self::ipv6_network_address( $ip, self::ipv6_rate_limit_prefix() );
+
+		return false !== $network ? $network : $ip;
+	}
+
+	/**
+	 * Effective IPv6 rate-limit prefix length.
+	 *
+	 * Filter: llar_ipv6_rate_limit_prefix (default 64). Clamped to 32–128 so a
+	 * filter returning 0 cannot collapse all clients into "::". /32 is only
+	 * the clamp floor — it creates a very wide shared budget; prefer 64 or 56.
+	 * Cached for the request: cleanup / log UI call normalize in tight loops.
+	 *
+	 * @return int
+	 */
+	public static function ipv6_rate_limit_prefix() {
+		static $cached = null;
+		if ( null !== $cached ) {
+			return $cached;
+		}
+
+		$prefix = \function_exists( 'apply_filters' )
+			? (int) \apply_filters( 'llar_ipv6_rate_limit_prefix', 64 )
+			: 64;
+
+		$cached = max( 32, min( 128, $prefix ) );
+
+		return $cached;
+	}
+
+	/**
+	 * Active lockout expiry for an IP, honouring both the rate-limit key and a
+	 * legacy full-address key (pre-normalization installs).
+	 *
+	 * @param array  $lockouts Lockouts option map.
+	 * @param string $raw_ip   Client IP as observed.
+	 * @return int Unix timestamp, or 0 when not locked.
+	 */
+	public static function get_active_lockout_until( $lockouts, $raw_ip ) {
+		if ( ! is_array( $lockouts ) ) {
+			return 0;
+		}
+
+		$key = self::normalize_ip_for_rate_limit( $raw_ip );
+		$a   = isset( $lockouts[ $key ] ) ? (int) $lockouts[ $key ] : 0;
+		$b   = ( $key !== $raw_ip && isset( $lockouts[ $raw_ip ] ) ) ? (int) $lockouts[ $raw_ip ] : 0;
+
+		return max( $a, $b );
+	}
+
+	/**
+	 * Retries counter for an IP, honouring both the rate-limit key and a legacy
+	 * full-address key (pre-normalization installs).
+	 *
+	 * @param array  $retries Retries option map.
+	 * @param string $raw_ip  Client IP as observed.
+	 * @return int
+	 */
+	public static function get_retries_count( $retries, $raw_ip ) {
+		if ( ! is_array( $retries ) ) {
+			return 0;
+		}
+
+		$key = self::normalize_ip_for_rate_limit( $raw_ip );
+		$a   = isset( $retries[ $key ] ) ? (int) $retries[ $key ] : 0;
+		$b   = ( $key !== $raw_ip && isset( $retries[ $raw_ip ] ) ) ? (int) $retries[ $raw_ip ] : 0;
+
+		return max( $a, $b );
+	}
+
+	/**
+	 * Effective attempt count for remaining-retries display.
+	 *
+	 * Takes max across the rate-limit key, legacy raw IP, and md5-hashed forms
+	 * of both. Intentionally max — not the legacy ($plain + $hashed) sum, which
+	 * double-counted when the same logical counter existed under both keys.
+	 *
+	 * @param array  $retries Retries option map.
+	 * @param string $raw_ip  Client IP as observed.
+	 * @return int
+	 */
+	public static function get_effective_retries_count( $retries, $raw_ip ) {
+		if ( ! is_array( $retries ) ) {
+			return 0;
+		}
+
+		$key = self::normalize_ip_for_rate_limit( $raw_ip );
+
+		return (int) max(
+			self::get_retries_count( $retries, $raw_ip ),
+			isset( $retries[ md5( $key ) ] ) ? (int) $retries[ md5( $key ) ] : 0,
+			isset( $retries[ md5( $raw_ip ) ] ) ? (int) $retries[ md5( $raw_ip ) ] : 0
+		);
+	}
+
+	/**
+	 * Attempts left in the current allowed_retries window.
+	 *
+	 * Hashed retries participate only via the effective attempt count (max),
+	 * not as a separate addend in the remainder arithmetic.
+	 *
+	 * @param int $attempt_count   Effective failed attempts (see get_effective_retries_count).
+	 * @param int $valid_until     Unix expiry of the retries window.
+	 * @param int $allowed_retries Configured attempts per window.
+	 * @param int $now             Optional clock override for tests.
+	 * @return int
+	 */
+	public static function retries_remaining( $attempt_count, $valid_until, $allowed_retries, $now = null ) {
+		$attempt_count   = (int) $attempt_count;
+		$valid_until     = (int) $valid_until;
+		$allowed_retries = (int) $allowed_retries;
+		$now             = null === $now ? time() : (int) $now;
+
+		if ( $attempt_count <= 0 || $allowed_retries <= 0 || $valid_until <= $now ) {
+			return 0;
+		}
+		if ( 0 === ( $attempt_count % $allowed_retries ) ) {
+			return 0;
+		}
+
+		return (int) max( $allowed_retries - ( $attempt_count % $allowed_retries ), 0 );
+	}
+
+	public static function detect_gateway() {
+
+		$gateway = 'wp_login';
+		// Use raw path for matching; avoid sanitize_text_field() which can alter the URI and break gateway detection.
+		$request_uri = isset( $_SERVER['REQUEST_URI'] ) ? rawurldecode( wp_unslash( $_SERVER['REQUEST_URI'] ) ) : '';
+		$action = isset( $_GET['action'] ) ? sanitize_text_field( wp_unslash( $_GET['action'] ) ) : '';
+
+		// Some plugins hide wp-login.php and mask REQUEST_URI.
+		// Prefer core routing marker when available.
+		if ( isset( $GLOBALS['pagenow'] ) && 'wp-login.php' === $GLOBALS['pagenow'] ) {
+			switch ( $action ) {
+				case 'lostpassword':
+					return 'wp_lostpassword';
+				case 'register':
+					return 'wp_register';
+				default:
+					return 'wp_login';
+			}
+		}
+
+		switch ( true ) {
+			case false !== strpos( $request_uri, 'wp-login.php' ) && ( ! $action || 'login' === $action ):
+				$gateway = 'wp_login';
+				break;
+			case 'lostpassword' === $action && false !== strpos( $request_uri, 'wp-login.php' ):
+				$gateway = 'wp_lostpassword';
+				break;
+			case 'register' === $action && false !== strpos( $request_uri, 'wp-login.php' ):
+				$gateway = 'wp_register';
+				break;
+			case isset( $GLOBALS['wp_xmlrpc_server'] ) && is_object( $GLOBALS['wp_xmlrpc_server'] ):
+				$gateway = 'wp_xmlrpc';
+				break;
+			case false === strpos( $request_uri, 'wp-login.php' ):
+				$gateway = trim( $request_uri, '/' );
+				$gateway = str_replace( '/', '_', $gateway );
+				$gateway = substr( sanitize_key( $gateway ), 0, 100 );
+				if ( empty( $gateway ) ) {
+					$gateway = 'custom_login';
+				}
+				break;
+		}
+
+		return $gateway;
+	}
+
+	public static function short_number($num) {
+	    $units = array( '', 'K', 'M', 'B', 'T' );
+	    for ($i = 0; $num >= 1000; $i++) {
+	        $num /= 1000;
+	    }
+		return round($num, 1) . $units[$i];
+	}
+
+	/**
+	 * Get current request URI from server globals.
+	 *
+	 * @return string
+	 */
+	public static function get_request_uri() {
+		return isset( $_SERVER['REQUEST_URI'] ) ? wp_unslash( $_SERVER['REQUEST_URI'] ) : '';
+	}
+
+	/**
+	 * Get current URL label from request URI.
+	 *
+	 * @return string
+	 */
+	public static function get_current_url_label() {
+		return preg_replace( '/^\/|\/$/', '', self::get_request_uri() );
+	}
+
+	/**
+	 * Get current URL with referer fallback.
+	 *
+	 * @return string
+	 */
+	public static function get_current_url() {
+		if ( isset( $_SERVER['HTTP_REFERER'] ) ) {
+			return wp_unslash( $_SERVER['HTTP_REFERER'] );
+		}
+
+		return get_site_url() . self::get_request_uri();
+	}
+
+	/**
+	 * Send HTML email with embedded LLAR logo using shared Mailer layout.
+	 *
+	 * @param string $to
+	 * @param string $subject
+	 * @param string $body Content-only HTML.
+	 *
+	 * @return bool
+	 */
+	public static function send_mail_with_logo( $to, $subject, $body ) {
+
+		add_action( 'phpmailer_init', array( 'LLAR\Core\Helpers', 'add_attachments_to_php_mailer' ) );
+
+		$sent = Mailer::send(
+			$to,
+			$subject,
+			$body,
+			array( 'content-type: text/html' ),
+			array(),
+			true,
+			array(
+				'title'    => $subject,
+				'logo_cid' => 'logo',
+			)
+		);
+
+		remove_action( 'phpmailer_init', array( 'LLAR\Core\Helpers', 'add_attachments_to_php_mailer' ) );
+
+		return (bool) $sent;
+	}
+
+	public static function add_attachments_to_php_mailer( &$phpmailer ) {
+		if ( ! self::is_llar_phpmailer_message( $phpmailer ) ) {
+			return;
+		}
+
+		$logo_path = LLA_PLUGIN_DIR . 'assets/img/llar-logo-email.png';
+
+		if( file_exists( $logo_path ) ) {
+			$phpmailer->AddEmbeddedImage( $logo_path, 'logo' );
+		}
+	}
+
+	/**
+	 * Determine if PHPMailer instance belongs to LLAR mail.
+	 *
+	 * @param \PHPMailer\PHPMailer\PHPMailer|object $phpmailer PHPMailer instance.
+	 * @return bool
+	 */
+	private static function is_llar_phpmailer_message( $phpmailer ) {
+		if ( is_object( $phpmailer ) && method_exists( $phpmailer, 'getCustomHeaders' ) ) {
+			$headers = $phpmailer->getCustomHeaders();
+			if ( is_array( $headers ) ) {
+				foreach ( $headers as $header ) {
+					if ( ! is_array( $header ) || count( $header ) < 2 ) {
+						continue;
+					}
+					$name  = strtolower( (string) $header[0] );
+					$value = strtolower( trim( (string) $header[1] ) );
+					if ( 'x-llar-email' === $name && 'true' === $value ) {
+						return true;
+					}
+				}
+			}
+		}
+
+		// Fallback for SMTP plugins that drop custom headers.
+		return Mailer::is_runtime_send_active();
+	}
+
+	public static function wp_locale() {
+		return str_replace( '_', '-', get_locale() );
+	}
+
+	/**
+	 * Load and cache CSS for email layout injected into the <style> block.
+	 *
+	 * @return string
+	 */
+	public static function get_email_css_text() {
+		static $css_text = null;
+
+		if ( null !== $css_text ) {
+			return $css_text;
+		}
+
+		$css_path = LLA_PLUGIN_DIR . 'views/emails/email-layout.css';
+		if ( file_exists( $css_path ) && is_readable( $css_path ) ) {
+			$css_text = (string) file_get_contents( $css_path );
+		} else {
+			$css_text = '';
+		}
+
+		return $css_text;
+	}
+
+	/**
+	 * Obfuscate email for handshake API: first+asterisks+last per part, preserving length (e.g. t**t@*******.***).
+	 *
+	 * @param string $email Raw email address.
+	 * @return string Obfuscated email or empty string if invalid.
+	 */
+	public static function obfuscate_email( $email ) {
+		$email = trim( (string) $email );
+		if ( $email === '' ) {
+			return '';
+		}
+		if ( ! preg_match( LLA_EMAIL_OBFUSCATE_REGEX, $email ) ) {
+			return '***@***.***';
+		}
+		$after_local  = preg_replace( LLA_EMAIL_OBFUSCATE_LOCAL, '*', $email );
+		$after_domain = preg_replace_callback( '/@(.*)$/', function ( $m ) {
+			return '@' . preg_replace_callback( '/[^.]+/', function ( $m2 ) {
+				return str_repeat( '*', strlen( $m2[0] ) );
+			}, $m[1] );
+		}, $after_local );
+		return $after_domain;
+	}
+
+
+	/**
+	 * Retrieves debug information for the Debug tab.
+	 *
+	 * @return string Debug info as a multi-line string.
+	 */
+	public static function get_debug_info() {
+		$debug_info = '';
+		$ips        = array();
+		$server     = array();
+
+		foreach ( $_SERVER as $key => $value ) {
+			if ( in_array( $key, array( 'SERVER_ADDR' ), true ) || is_array( $value ) ) {
+				continue;
+			}
+			$ips_for_check = array_map( 'trim', explode( ',', $value ) );
+			foreach ( $ips_for_check as $ip ) {
+				if ( self::is_ip_valid( $ip ) ) {
+					if ( ! in_array( $ip, $ips, true ) ) {
+						$ips[] = $ip;
+					}
+					if ( ! isset( $server[ $key ] ) ) {
+						$server[ $key ] = '';
+					}
+					if ( in_array( $ip, array( '127.0.0.1', '0.0.0.0' ), true ) ) {
+						$server[ $key ] = $ip;
+					} else {
+						$server[ $key ] .= 'IP' . array_search( $ip, $ips, true ) . ',';
+					}
+				}
+			}
+		}
+		$debug_info .= 'IPs:' . "\n";
+		foreach ( $server as $server_key => $ips_val ) {
+			$debug_info .= $server_key . ' = ' . trim( $ips_val, ',' ) . "\n";
+		}
+
+		$plugin_data = get_plugin_data( LLA_PLUGIN_FILE );
+		if ( is_array( $plugin_data ) ) {
+			$version = isset( $plugin_data['Version'] ) ? $plugin_data['Version'] : '';
+			$debug_info .= "\nPlugin Version: " . $version . "\n";
+		} else {
+			$debug_info .= "\nPlugin Version: \n";
+		}
+		$debug_info .= 'WordPress Version: ' . get_bloginfo( 'version' ) . "\n";
+		$debug_info .= 'Is Multisite: ' . ( is_multisite() ? 'yes' : 'no' ) . "\n";
+		$debug_info .= "\nActive Plugins:\n";
+		$all_plugins = get_plugins();
+		$active_plugins = get_option( 'active_plugins' );
+		if ( is_array( $active_plugins ) ) {
+			foreach ( $active_plugins as $plugin_file ) {
+				if ( isset( $all_plugins[ $plugin_file ] ) ) {
+					$plugin_data_item = $all_plugins[ $plugin_file ];
+
+					$name    = isset( $plugin_data_item['Name'] ) ? $plugin_data_item['Name'] : '';
+					$version = isset( $plugin_data_item['Version'] ) ? $plugin_data_item['Version'] : '';
+					$uri     = isset( $plugin_data_item['PluginURI'] ) ? $plugin_data_item['PluginURI'] : '';
+
+					// Base slug from path.
+					$slug = dirname( $plugin_file );
+
+					// Single-file plugin at plugins root: dirname() returns '.'.
+					if ( '.' === $slug || '' === $slug ) {
+						$slug = basename( $plugin_file, '.php' );
+					}
+
+
+					// If PluginURI points to WordPress.org, prefer slug from the URI.
+					if ( ! empty( $uri ) && preg_match( '#WordPress\.org/plugins/([^/]+)/?#i', $uri, $m ) ) {
+						$slug = $m[1];
+					}
+
+					// Normalize slug similar to WP's sanitize_title().
+					$slug = sanitize_title( $slug );
+
+					$mu_indicator = '';
+					if ( 0 === strpos( $plugin_file, 'limit-login-attempts-reloaded' ) ) {
+						$mu_indicator = self::is_mu() ? ' MU' : '';
+					}
+
+					// Prefer official WordPress.org PluginURI when it is clearly such.
+					if ( ! empty( $uri ) && 0 === strpos( $uri, 'https://wordpress.org/plugins/' ) ) {
+						$debug_info .= $name . ' ' . $version . ' (' . $uri . ')' . $mu_indicator . "\n";
+					} else {
+						$debug_info .= $name . ' ' . $version . ' (https://wordpress.org/plugins/' . $slug . '/)' . $mu_indicator . "\n";
+					}
+				}
+			}
+		}
+
+		$current_theme = wp_get_theme();
+		$theme_name    = is_object( $current_theme ) ? $current_theme->get( 'Name' ) : '';
+		$theme_uri     = is_object( $current_theme ) ? $current_theme->get( 'ThemeURI' ) : '';
+		$theme_slug    = is_object( $current_theme ) ? $current_theme->get_stylesheet() : '';
+
+		$debug_info .= "\nActive Theme:\n";
+
+		if ( ! empty( $theme_uri ) && 0 === strpos( $theme_uri, 'https://wordpress.org/themes/' ) ) {
+			$debug_info .= $theme_name . ' (' . $theme_uri . ')' . "\n";
+		} else {
+			$debug_info .= $theme_name . ' (https://wordpress.org/themes/' . $theme_slug . '/)' . "\n";
+		}
+
+		return $debug_info;
+	}
+
+	/**
+	 * Write the plugin's header Version to options (for migrations / diagnostics after activate or in-dashboard update).
+	 *
+	 * @return void
+	 */
+	public static function persist_stored_plugin_version() {
+		Config::init();
+		$plugin_data = get_plugin_data( LLA_PLUGIN_FILE, false, false );
+		$version     = is_array( $plugin_data ) && ! empty( $plugin_data['Version'] )
+			? sanitize_text_field( $plugin_data['Version'] )
+			: '';
+		Config::update( 'plugin_version', $version );
+	}
+
+
+	/**
+	 * Returns compatibility data for the Debug tab.
+	 *
+	 * Shows which LLAR features work with which third-party plugins.
+	 * Values reflect integration code and the readme "Compatible With" list.
+	 *
+	 * @return array
+	 */
+	public static function get_compatibility_data() {
+		return require LLA_PLUGIN_DIR . 'resources/compatibility-data.php';
+	}
+
+}
