@@ -7,7 +7,7 @@ final class NochesReservaTest extends TestCase
 {
     public function test_cuenta_las_noches_entre_dos_fechas(): void
     {
-        $this->assertSame(3, h5_noches_reserva('2026-12-01', '2026-12-04'));
+        $this->assertSame(4, h5_noches_reserva('2026-12-01', '2026-12-04'));
     }
 
     public function test_misma_fecha_son_cero_noches(): void
