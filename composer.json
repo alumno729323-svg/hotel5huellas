@@ -1,0 +1,9 @@
+{
+  "name": "hotel5huellas/hotel",
+  "description": "Hotel 5 Huellas - tests",
+  "require-dev": {
+    "phpunit/phpunit": "^10.5",
+    "behat/behat": "^3.14"
+  },
+  "config": { "sort-packages": true }
+}

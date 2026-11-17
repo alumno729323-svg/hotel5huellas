@@ -1,41 +1,59 @@
-name: Despliegue automático
+name: CI-CD Hotel 5 Huellas
 
 on:
+  pull_request:
+    branches: [main]
   push:
     branches: [main]
+  workflow_dispatch:
 
-permissions:
-  contents: read
-  packages: write
+concurrency:
+  group: hotel5huellas-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  build:
+  test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          tools: composer
+      - run: composer install --no-interaction --prefer-dist
+      - name: Tests unitarios (TDD - PHPUnit)
+        run: vendor/bin/phpunit
+      - name: Tests de comportamiento (BDD - Behat)
+        if: ${{ hashFiles('features/*.feature') != '' }}
+        run: vendor/bin/behat --colors --no-interaction
 
-      - name: Construir imagen Docker
-        run: docker build -t hotel-5-huellas .
-
-      - name: Comprobar que el código PHP no tiene errores
-        run: |
-          docker run --rm hotel-5-huellas sh -c 'for f in $(find /usr/src/wordpress/wp-content/themes/hotel-5-huellas /usr/src/wordpress/wp-content/mu-plugins -name "*.php" 2>/dev/null); do php -l "$f" || exit 1; done'
-
-      - name: Subir imagen a GitHub Container Registry
-        run: |
-          IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}:latest
-          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
-          docker tag hotel-5-huellas $IMAGE
-          docker push $IMAGE
-
-  deploy:
-    needs: build
-    runs-on: self-hosted
-    env:
-      DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
-      DB_ROOT_PASSWORD: ${{ secrets.DB_ROOT_PASSWORD }}
+  build:
+    needs: test
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Desplegar con Docker Compose
+      - name: Validar docker-compose
+        run: docker compose config -q
+        env:
+          DB_PASSWORD: x
+          DB_ROOT_PASSWORD: x
+      - name: Construir imagen candidata
+        run: docker build -t hotel5huellas-candidata .
+      - name: Comprobar sintaxis PHP
+        run: find wp-content -name '*.php' -print0 | xargs -0 -n1 php -l
+
+  deploy:
+    needs: [test, build]
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+      - name: Desplegar
         shell: cmd
-        run: docker compose up -d --build -V
+        env:
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          DB_ROOT_PASSWORD: ${{ secrets.DB_ROOT_PASSWORD }}
+        run: docker compose -p hotel5huellas up -d --build -V --no-deps --force-recreate wordpress
+      - name: Comprobar que responde
+        shell: cmd
+        run: curl --retry 15 --retry-delay 4 --retry-connrefused -fsS http://localhost:8080/ -o NUL
