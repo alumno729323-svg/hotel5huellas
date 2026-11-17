@@ -244,9 +244,9 @@ function h5_r_reservar(WP_REST_Request $r) {
     $hasta = h5_fecha($r->get_param('hasta'));
     if (!$desde || !$hasta) return h5_err('h5_val', 'Elige las fechas en el calendario.');
     if ($desde < h5_hoy()) return h5_err('h5_val', 'La fecha de entrada ya pasó.');
-    $noches = h5_noches($desde, $hasta);
-    if ($noches < 1)  return h5_err('h5_val', 'La salida debe ser después de la entrada.');
-    if ($noches > 30) return h5_err('h5_val', 'Máximo 30 noches por reserva.');
+        $noches = h5_noches_reserva($desde, $hasta);
+    if ($noches < 1)                return h5_err('h5_val', 'La salida debe ser después de la entrada.');
+    if ($noches > H5_MAX_NOCHES)    return h5_err('h5_val', 'Máximo ' . H5_MAX_NOCHES . ' noches por reserva.');
 
     $extras = $r->get_param('extras');
     $extras = is_array($extras) ? array_values(array_unique(array_map('sanitize_key', $extras))) : [];
