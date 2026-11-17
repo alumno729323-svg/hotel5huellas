@@ -56,4 +56,4 @@ jobs:
         run: docker compose -p hotel5huellas up -d --build -V --no-deps --force-recreate wordpress
       - name: Comprobar que responde
         shell: cmd
-        run: curl --retry 15 --retry-delay 4 --retry-connrefused -fsS http://localhost:8080/ -o NUL
+        run: curl --retry 20 --retry-delay 5 --retry-all-errors --retry-connrefused -fsS http://localhost:8080/ -o NUL
