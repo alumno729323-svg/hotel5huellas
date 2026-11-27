@@ -1,0 +1,35 @@
+/* ═══════════ Guía de bienvenida (tour) ═══════════ */
+.h5t-bloqueo{position:fixed;inset:0;z-index:90;background:transparent}
+.h5t-bloqueo.h5t-fondo{background:rgba(31,42,90,.62)}
+.h5t-foco{position:fixed;z-index:91;border:3px solid var(--amarillo);border-radius:16px;box-shadow:0 0 0 9999px rgba(31,42,90,.62);pointer-events:none;transition:top .25s,left .25s,width .25s,height .25s}
+.h5t-pop{position:fixed;z-index:92;width:min(380px,calc(100vw - 24px));padding:1.1rem 1.2rem 1rem;background:var(--blanco);color:var(--navy);border:var(--borde);border-radius:var(--radio);box-shadow:var(--sombra);animation:h5t-in .22s ease-out}
+.h5t-pop.h5t-centro{left:50%;top:50%;transform:translate(-50%,-50%);width:min(440px,calc(100vw - 24px));text-align:center}
+.h5t-pop h3{margin:0 0 .35em;font-size:1.25rem}
+.h5t-pop p{margin:0 0 .9em;font-size:.98rem}
+.h5t-emoji{font-size:2.6rem;line-height:1;margin-bottom:.3rem}
+.h5t-pie{display:flex;align-items:center;justify-content:space-between;gap:.6rem;flex-wrap:wrap}
+.h5t-acciones{display:flex;gap:.5rem;margin-left:auto}
+.h5t-pop .btn{padding:.45em 1.1em;font-size:.95rem}
+.h5t-saltar{background:none;border:0;color:var(--gris);font:700 .88rem 'Nunito',sans-serif;text-decoration:underline;cursor:pointer;padding:.3rem}
+.h5t-saltar:hover{color:var(--navy)}
+.h5t-prog{display:flex;align-items:center;gap:.35rem;margin-bottom:.8rem;font-size:.8rem;font-weight:800;color:var(--gris)}
+.h5t-puntos{display:flex;gap:.25rem}
+.h5t-puntos i{width:.55rem;height:.55rem;border-radius:50%;border:2px solid var(--navy);background:var(--blanco)}
+.h5t-puntos i.on{background:var(--coral)}
+.h5t-puntos i.hecho{background:var(--amarillo)}
+.h5t-centro .h5t-prog{justify-content:center}
+.h5t-centro .h5t-pie{justify-content:center}
+.h5t-centro .h5t-acciones{margin-left:0}
+#h5t-btn{white-space:nowrap}
+@keyframes h5t-in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.h5t-pop.h5t-centro{animation:h5t-in-c .22s ease-out}
+@keyframes h5t-in-c{from{opacity:0;transform:translate(-50%,-46%)}to{opacity:1;transform:translate(-50%,-50%)}}
+@media (max-width:640px){
+  .h5t-pop:not(.h5t-centro){left:12px!important;right:12px;top:auto!important;bottom:12px;width:auto}
+  #h5t-btn{padding:.35em .7em}
+  #h5t-btn span{display:none}
+}
+@media (prefers-reduced-motion:reduce){
+  .h5t-foco{transition:none}
+  .h5t-pop,.h5t-pop.h5t-centro{animation:none}
+}
