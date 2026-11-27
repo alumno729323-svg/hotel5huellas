@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Hotel 5 Huellas - Fotos de pájaros y conejos
  * Description: Las fotos de pájaros y conejos salen de Wikipedia (estable y sin clave).
- *              Perros y gatos siguen funcionando como antes.
+ *              Si Wikipedia no responde, se usa la fuente original. Perros y gatos no cambian.
  */
 if (!defined('ABSPATH')) exit;
 
@@ -50,8 +50,6 @@ add_filter('rest_pre_dispatch', function ($resultado, $server, $request) {
         }
     }
     $url = h5_foto_wiki($temas[$tipo]);
-    if (!$url) {
-        return new WP_REST_Response(['code' => 'h5_ext', 'message' => 'La cámara de este animal no responde ahora mismo.', 'data' => ['status' => 502]], 502);
-    }
+    if (!$url) return $resultado;                          // Wikipedia no responde: se usa la fuente de siempre (hotel-api.php)
     return new WP_REST_Response(['tipo' => $tipo, 'url' => esc_url_raw($url)], 200);
 }, 10, 3);
