@@ -14,6 +14,12 @@ add_action('wp_enqueue_scripts', function () {
     wp_enqueue_style('h5-fonts', 'https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&family=Nunito:wght@400;600;700;800&display=swap', [], null);
     wp_enqueue_style('h5-style', get_stylesheet_uri(), ['h5-fonts'], $v_css);
     wp_enqueue_script('h5-app', get_template_directory_uri() . '/app.js', [], $v_js, true);
+    
+    // Guía de bienvenida paso a paso
+    $v_tcss = file_exists($dir . '/tour.css') ? filemtime($dir . '/tour.css') : '1';
+    $v_tjs  = file_exists($dir . '/tour.js') ? filemtime($dir . '/tour.js') : '1';
+    wp_enqueue_style('h5-tour', get_template_directory_uri() . '/tour.css', ['h5-style'], $v_tcss);
+    wp_enqueue_script('h5-tour', get_template_directory_uri() . '/tour.js', ['h5-app'], $v_tjs, true);
 
     $cfg = [
         'root'    => rest_url('hotel/v1/'),
