@@ -279,3 +279,7 @@ fieldset{border:var(--borde);border-radius:14px;padding:.6rem .9rem;display:grid
   .chip small,.chip #chipNombre{display:none}
   .galeria{grid-template-columns:1fr 1fr}
 }
+/* cámara: botones con el nombre de tus mascotas */
+.pet-mias{margin-bottom:.4rem;text-align:center}
+.pet-mias .pet-btns{margin-bottom:.5rem}
+.pet-mias-t{margin:.2rem 0 .5rem!important}
